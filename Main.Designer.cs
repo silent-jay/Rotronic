@@ -32,8 +32,11 @@
             this.calibrationsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.optionsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.headerViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.listView1 = new System.Windows.Forms.ListView();
-            this.listView2 = new System.Windows.Forms.ListView();
+            this.listViewRotProbe = new System.Windows.Forms.ListView();
+            this.label1 = new System.Windows.Forms.Label();
+            this.listViewMirror = new System.Windows.Forms.ListView();
+            this.label2 = new System.Windows.Forms.Label();
+            this.mirrorViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -59,7 +62,8 @@
             // optionsToolStripMenuItem
             // 
             this.optionsToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.headerViewToolStripMenuItem});
+            this.headerViewToolStripMenuItem,
+            this.mirrorViewToolStripMenuItem});
             this.optionsToolStripMenuItem.Name = "optionsToolStripMenuItem";
             this.optionsToolStripMenuItem.Size = new System.Drawing.Size(92, 29);
             this.optionsToolStripMenuItem.Text = "Options";
@@ -68,37 +72,63 @@
             // 
             this.headerViewToolStripMenuItem.Name = "headerViewToolStripMenuItem";
             this.headerViewToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
-            this.headerViewToolStripMenuItem.Text = "List View Options";
+            this.headerViewToolStripMenuItem.Text = "Probe View";
             this.headerViewToolStripMenuItem.Click += new System.EventHandler(this.headerViewToolStripMenuItem_Click);
             // 
-            // listView1
+            // listViewRotProbe
             // 
-            this.listView1.AllowColumnReorder = true;
-            this.listView1.HideSelection = false;
-            this.listView1.Location = new System.Drawing.Point(110, 751);
-            this.listView1.Name = "listView1";
-            this.listView1.Size = new System.Drawing.Size(2380, 308);
-            this.listView1.TabIndex = 2;
-            this.listView1.UseCompatibleStateImageBehavior = false;
-            this.listView1.View = System.Windows.Forms.View.Details;
+            this.listViewRotProbe.AllowColumnReorder = true;
+            this.listViewRotProbe.HideSelection = false;
+            this.listViewRotProbe.Location = new System.Drawing.Point(51, 117);
+            this.listViewRotProbe.Name = "listViewRotProbe";
+            this.listViewRotProbe.Size = new System.Drawing.Size(1817, 357);
+            this.listViewRotProbe.TabIndex = 2;
+            this.listViewRotProbe.UseCompatibleStateImageBehavior = false;
+            this.listViewRotProbe.View = System.Windows.Forms.View.Details;
             // 
-            // listView2
+            // label1
             // 
-            this.listView2.HideSelection = false;
-            this.listView2.Location = new System.Drawing.Point(110, 141);
-            this.listView2.Name = "listView2";
-            this.listView2.Size = new System.Drawing.Size(2497, 576);
-            this.listView2.TabIndex = 3;
-            this.listView2.UseCompatibleStateImageBehavior = false;
-            this.listView2.View = System.Windows.Forms.View.Details;
+            this.label1.AutoSize = true;
+            this.label1.Location = new System.Drawing.Point(51, 91);
+            this.label1.Name = "label1";
+            this.label1.Size = new System.Drawing.Size(83, 20);
+            this.label1.TabIndex = 3;
+            this.label1.Text = "Probe Info";
+            // 
+            // listViewMirror
+            // 
+            this.listViewMirror.HideSelection = false;
+            this.listViewMirror.Location = new System.Drawing.Point(63, 554);
+            this.listViewMirror.Name = "listViewMirror";
+            this.listViewMirror.Size = new System.Drawing.Size(1804, 187);
+            this.listViewMirror.TabIndex = 4;
+            this.listViewMirror.UseCompatibleStateImageBehavior = false;
+            // 
+            // label2
+            // 
+            this.label2.AutoSize = true;
+            this.label2.Location = new System.Drawing.Point(63, 528);
+            this.label2.Name = "label2";
+            this.label2.Size = new System.Drawing.Size(104, 20);
+            this.label2.TabIndex = 5;
+            this.label2.Text = "Standard List";
+            // 
+            // mirrorViewToolStripMenuItem
+            // 
+            this.mirrorViewToolStripMenuItem.Name = "mirrorViewToolStripMenuItem";
+            this.mirrorViewToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.mirrorViewToolStripMenuItem.Text = "Mirror View";
+            this.mirrorViewToolStripMenuItem.Click += new System.EventHandler(this.mirrorViewToolStripMenuItem_Click);
             // 
             // Main
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(2638, 1104);
-            this.Controls.Add(this.listView2);
-            this.Controls.Add(this.listView1);
+            this.Controls.Add(this.label2);
+            this.Controls.Add(this.listViewMirror);
+            this.Controls.Add(this.label1);
+            this.Controls.Add(this.listViewRotProbe);
             this.Controls.Add(this.menuStrip1);
             this.MainMenuStrip = this.menuStrip1;
             this.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
@@ -116,8 +146,11 @@
         private System.Windows.Forms.ToolStripMenuItem calibrationsToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem optionsToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem headerViewToolStripMenuItem;
-        private System.Windows.Forms.ListView listView1;
-        private System.Windows.Forms.ListView listView2;
+        private System.Windows.Forms.ListView listViewRotProbe;
+        private System.Windows.Forms.Label label1;
+        private System.Windows.Forms.ListView listViewMirror;
+        private System.Windows.Forms.Label label2;
+        private System.Windows.Forms.ToolStripMenuItem mirrorViewToolStripMenuItem;
     }
 }
 

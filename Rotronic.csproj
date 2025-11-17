@@ -47,11 +47,19 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="HeaderOptions.cs" />
-    <Compile Include="OptionsFrm.cs">
+    <Compile Include="Mirror.cs" />
+    <Compile Include="MirrorDisplayOptions.cs" />
+    <Compile Include="MirrorOptions.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="OptionsFrm.Designer.cs">
-      <DependentUpon>OptionsFrm.cs</DependentUpon>
+    <Compile Include="MirrorOptions.Designer.cs">
+      <DependentUpon>MirrorOptions.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ProbeOptions.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ProbeOptions.Designer.cs">
+      <DependentUpon>ProbeOptions.cs</DependentUpon>
     </Compile>
     <Compile Include="RotProbe.cs" />
     <Compile Include="Main.cs">
@@ -63,8 +71,11 @@
     <Compile Include="Notes\ToDo.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <EmbeddedResource Include="OptionsFrm.resx">
-      <DependentUpon>OptionsFrm.cs</DependentUpon>
+    <EmbeddedResource Include="MirrorOptions.resx">
+      <DependentUpon>MirrorOptions.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ProbeOptions.resx">
+      <DependentUpon>ProbeOptions.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Main.resx">
       <DependentUpon>Main.cs</DependentUpon>
@@ -78,6 +89,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <None Include="Notes\473_manual.pdf" />
     <None Include="Notes\E-M-AC3000-CP_20.pdf" />
     <None Include="Notes\E-M-AC3000-CP_25.pdf" />
     <None Include="Notes\E-M-HFHP-CP_13.pdf" />

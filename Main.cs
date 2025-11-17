@@ -15,13 +15,12 @@ namespace Rotronic
 {
     public partial class Main : Form
     {
-        // Timer to refresh listView2 periodically
+        // Timer to refresh listViewRotProbe periodically
         private System.Windows.Forms.Timer _refreshTimer;
 
         public Main()
         {
             InitializeComponent();
-
             // Initialize timer
             _refreshTimer = new System.Windows.Forms.Timer();
             _refreshTimer.Interval = 15_000; // 15 seconds
@@ -30,29 +29,59 @@ namespace Rotronic
 
             // Initial population
             RefreshConnectedProbes();
+            RefreshConnectedMirrors();
         }
 
+        // Pseudocode / Plan:
+        // 1. Load HeaderOptions (or create defaults).
+        // 2. Clear existing columns (ColumnHeaderCollection is never null).
+        // 3. For each visible ordered entry:
+        //    a. Build a ColumnHeader instance and set Name, Text, Width and TextAlign.
+        //    b. Add the ColumnHeader object to listViewRotProbe.Columns.
+        // 4. This avoids calling a non-existent overload of Columns.Add that takes 4 args.
         private void RefreshTimer_Tick(object sender, EventArgs e)
         {
             RefreshConnectedProbes();
+            RefreshConnectedMirrors();
         }
 
-        // Refreshes listView2 with contents of Program.ConnectedProbes
+        private void RefreshConnectedMirrors()
+        {
+            /*No mirror available right now. This is a placeholder for future implementation.
+             *Will implement communication with mirror device when available, for now we're setting it up to use dummy data.
+             */
+
+             
+        }
+
+        // Refreshes listViewRotProbe with contents of Program.ConnectedProbes, mapping HeaderOptions.Field -> RotProbe property names
         private void RefreshConnectedProbes()
         {
-            if (listView2 == null)
+            if (listViewRotProbe == null)
                 return;
 
             try
             {
-                listView2.BeginUpdate();
-                listView2.Items.Clear();
+                listViewRotProbe.BeginUpdate();
+                listViewRotProbe.Items.Clear();
 
-                // If Program.ConnectedProbes is null, treat as empty
                 var probes = Program.ConnectedProbes;
                 if (probes == null)
+                {
+                    listViewRotProbe.Columns.Clear();
                     return;
+                }
 
+                // Load display options to determine which logical fields/columns to show
+                var displayOptions = HeaderOptions.Load() ?? new HeaderOptions();
+                var visibleFields = displayOptions.GetVisibleOrdered().ToList();
+                if (visibleFields.Count == 0)
+                {
+                    listViewRotProbe.Columns.Clear();
+                    return;
+                }
+
+                // Determine element type
                 Type elementType = null;
                 var probesType = probes.GetType();
                 var enumInterface = probesType.GetInterfaces()
@@ -62,7 +91,6 @@ namespace Rotronic
                     elementType = enumInterface.GetGenericArguments()[0];
                 }
 
-                // If we couldn't determine element type from generic interface, get first element to infer type
                 object firstElement = null;
                 var enumer = probes as System.Collections.IEnumerable;
                 if (enumer != null)
@@ -77,41 +105,136 @@ namespace Rotronic
                 if (elementType == null && firstElement != null)
                     elementType = firstElement.GetType();
 
-                // If still no element type and no items, nothing to display
-                if (elementType == null)
-                    return;
+                // If we still don't know element type, fall back to showing ToString() values
+                listViewRotProbe.View = View.Details;
+                listViewRotProbe.FullRowSelect = true;
+                listViewRotProbe.Columns.Clear();
 
-                // Get public instance properties
-                var props = elementType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
-
-                // Configure listView2 for details view and clear/prepare columns
-                listView2.View = View.Details;
-                listView2.FullRowSelect = true;
-                listView2.Columns.Clear();
-
-                if (props.Length == 0)
+                // Create columns based on display options; create ColumnHeader objects explicitly
+                foreach (var kv in visibleFields)
                 {
-                    // Fallback: single column showing .ToString()
-                    listView2.Columns.Add("Value", -2, HorizontalAlignment.Left);
+                    var field = kv.Key;
+                    var option = kv.Value;
+                    var headerText = option.HeaderText ?? field.ToString();
 
+                    var column = new ColumnHeader
+                    {
+                        Name = field.ToString(),
+                        Text = headerText,
+                        Width = 120,
+                        TextAlign = HorizontalAlignment.Left
+                    };
+
+                    listViewRotProbe.Columns.Add(column);
+                }
+
+                if (elementType == null)
+                {
+                    // No probe type info: list ToString() for each item in single column
                     if (enumer != null)
                     {
                         foreach (var itemObj in enumer)
                         {
                             var text = itemObj?.ToString() ?? string.Empty;
                             var lvi = new ListViewItem(text);
-                            listView2.Items.Add(lvi);
+                            listViewRotProbe.Items.Add(lvi);
                         }
                     }
                 }
                 else
                 {
-                    // Create columns for each property
-                    foreach (var p in props)
+                    // Build a property cache mapping Field -> PropertyInfo (or null if not found)
+                    var propCache = new Dictionary<HeaderOptions.Field, PropertyInfo>();
+                    var props = elementType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
+
+                    Func<string, PropertyInfo> findProp = (fieldName) =>
                     {
-                        listView2.Columns.Add(p.Name, 120, HorizontalAlignment.Left);
+                        if (string.IsNullOrWhiteSpace(fieldName))
+                            return null;
+
+                        // 1) exact match (case-insensitive)
+                        var p = elementType.GetProperty(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+                        if (p != null) return p;
+
+                        // Normalize name: remove underscores/spaces
+                        string normalizedField = new string(fieldName.Where(c => c != '_' && c != ' ').ToArray());
+                        foreach (var candidate in props)
+                        {
+                            var normalizedCandidate = new string(candidate.Name.Where(c => c != '_' && c != ' ').ToArray());
+                            if (string.Equals(normalizedCandidate, normalizedField, StringComparison.OrdinalIgnoreCase))
+                                return candidate;
+                        }
+
+                        // 2) contains
+                        foreach (var candidate in props)
+                        {
+                            if (candidate.Name.IndexOf(fieldName, StringComparison.OrdinalIgnoreCase) >= 0)
+                                return candidate;
+                        }
+
+                        // 3) not found
+                        return null;
+                    };
+
+                    // Prepopulate cache
+                    foreach (var kv in visibleFields)
+                    {
+                        var field = kv.Key;
+                        var fieldName = field.ToString();
+                        PropertyInfo matched = findProp(fieldName);
+
+                        // Try some common alternate names for known fields (best-effort)
+                        if (matched == null)
+                        {
+                            switch (fieldName.ToLowerInvariant())
+                            {
+                                case "comport":
+                                case "com_port":
+                                    matched = findProp("Port") ?? findProp("ComPort");
+                                    break;
+                                case "serialnumber":
+                                    matched = findProp("Serial") ?? findProp("SerialNo") ?? findProp("SerialNumber");
+                                    break;
+                                case "devicename":
+                                    matched = findProp("Name") ?? findProp("DeviceName");
+                                    break;
+                                case "firmwareversion":
+                                    matched = findProp("Firmware") ?? findProp("FirmwareVersion") ?? findProp("FwVersion");
+                                    break;
+                                case "devicemodel":
+                                    matched = findProp("Model") ?? findProp("DeviceModel");
+                                    break;
+                                // add other heuristics here as needed
+                            }
+                        }
+
+                        // Handle the consistent misspelling in RotProbe: "Humdity" vs the enum "Humidity"
+                        // Try swapping "Humidity" <-> "Humdity" so fields like HumidityUnit map to HumdityUnit property
+                        if (matched == null)
+                        {
+                            try
+                            {
+                                if (fieldName.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    var alt = fieldName.Replace("Humidity", "Humdity");
+                                    matched = findProp(alt);
+                                }
+                                else if (fieldName.IndexOf("Humdity", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    var alt = fieldName.Replace("Humdity", "Humidity");
+                                    matched = findProp(alt);
+                                }
+                            }
+                            catch
+                            {
+                                // ignore any unexpected replacement errors
+                            }
+                        }
+
+                        propCache[field] = matched;
                     }
 
+                    // Populate rows
                     if (enumer != null)
                     {
                         foreach (var itemObj in enumer)
@@ -119,39 +242,52 @@ namespace Rotronic
                             if (itemObj == null)
                                 continue;
 
-                            var values = new List<string>(props.Length);
-                            foreach (var p in props)
+                            var values = new List<string>(visibleFields.Count);
+                            foreach (var kv in visibleFields)
                             {
-                                try
+                                var field = kv.Key;
+                                var prop = propCache[field];
+                                if (prop != null)
                                 {
-                                    var v = p.GetValue(itemObj);
-                                    values.Add(v?.ToString() ?? string.Empty);
+                                    try
+                                    {
+                                        var v = prop.GetValue(itemObj);
+                                        values.Add(v?.ToString() ?? string.Empty);
+                                    }
+                                    catch
+                                    {
+                                        values.Add(string.Empty);
+                                    }
                                 }
-                                catch
+                                else
                                 {
+                                    // No matching property: fallback to empty string
                                     values.Add(string.Empty);
                                 }
                             }
 
-                            // First property becomes the item text, rest are subitems
+                            // Build ListViewItem: first value as text, others as subitems
                             var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
                             for (int i = 1; i < values.Count; i++)
                                 lvi.SubItems.Add(values[i]);
 
-                            listView2.Items.Add(lvi);
+                            listViewRotProbe.Items.Add(lvi);
                         }
                     }
                 }
 
-                // Auto-resize columns to fit content
-                for (int i = 0; i < listView2.Columns.Count; i++)
+                // Preserve user-resized widths: only ensure that columns have a reasonable minimum width.
+                const int MinColumnWidth = 40;
+                for (int i = 0; i < listViewRotProbe.Columns.Count; i++)
                 {
-                    listView2.AutoResizeColumn(i, ColumnHeaderAutoResizeStyle.ColumnContent);
+                    var col = listViewRotProbe.Columns[i];
+                    if (col.Width < MinColumnWidth)
+                        col.Width = 120; // reset to default if somehow extremely small
                 }
             }
             finally
             {
-                listView2.EndUpdate();
+                listViewRotProbe.EndUpdate();
             }
         }
 
@@ -179,6 +315,14 @@ namespace Rotronic
 
             // If changes in the options affect the main form, refresh here:
             // RefreshConnectedProbes();
+        }
+
+        private void mirrorViewToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using (var optionsForm = new MirrorOptions())
+            {
+                optionsForm.ShowDialog(this);
+            }
         }
     }
 }

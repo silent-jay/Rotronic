@@ -20,6 +20,7 @@ namespace Rotronic
         // New: list of connected probes and synchronization for that list
         private static readonly object probesLock = new object();
         public static List<RotProbe> ConnectedProbes { get; private set; } = new List<RotProbe>();
+        public static List<Mirror> ConnectedMirrors = MirrorData();
 
         // New: timer to periodically refresh data
         private static System.Threading.Timer probeTimer;
@@ -53,7 +54,6 @@ namespace Rotronic
 
             // Create the form instance (calls InitializeComponent)
             var mainForm = new Main();
-
             Application.Run(mainForm);
         }
 
@@ -70,6 +70,90 @@ namespace Rotronic
                 monitoringStarted = true;
                 try { Debug.WriteLine($"StartProbeMonitoring: started with interval {intervalMs}ms"); } catch { }
             }
+        }
+
+        public static List<Mirror> MirrorData()
+        {
+            // PSEUDOCODE / DETAILED PLAN:
+            // - Fix 1: method must be static because it's inside the static class `Program`.
+            // - Fix 2..5: the `Mirror` type in this project does not contain `Temperature` or `Humidity`
+            //   properties (it does contain `Humdity` as used earlier). Avoid assigning non-existent
+            //   properties to compile cleanly.
+            // - Approach:
+            //   1. Make the method `static`.
+            //   2. Create three `Mirror` instances using object initializers.
+            //   3. Only set properties that exist on `Mirror` (use `DewPoint`, `FrostPoint`, `Humdity`).
+            //   4. Return the populated `List<Mirror>`.
+            //
+            // Note: If your `Mirror` class actually defines different property names, replace the
+            // property identifiers below with the correct ones from that class.
+            //*this is a place holder until actual communication is implemented with an actual chilled mirror.
+
+            var list = new List<Mirror>
+            {
+                new Mirror
+                {
+                    DewPoint   =  1.23,
+                    FrostPoint = -2.34,
+                    Humdity    = 50.00,
+                    WMO = 40.15,
+                    VolumeRatio = 4,
+                    WeightRatio = 4,
+                    AbsoluteHumdity = 1,
+                    SpecificHumdity = 1,
+                    VaporPressure = 1,
+                    HeadPressure= 1,
+                    ExternalTemp= 1,
+                    MirrorTemp = 1,
+                    HeadTemp = 1,
+                    MirrorResistance = 1,
+                    ID= "RH 123",
+                    IDN = "123",
+                    Stable = true
+                },
+                new Mirror
+                {
+                    DewPoint   =  1.23,
+                    FrostPoint = -2.34,
+                    Humdity    = 50.00,
+                    WMO = 40.15,
+                    VolumeRatio = 4,
+                    WeightRatio = 4,
+                    AbsoluteHumdity = 1,
+                    SpecificHumdity = 1,
+                    VaporPressure = 1,
+                    HeadPressure= 1,
+                    ExternalTemp= 1,
+                    MirrorTemp = 1,
+                    HeadTemp = 1,
+                    MirrorResistance = 1,
+                    ID= "RH 123",
+                    IDN = "123",
+                    Stable = true
+                },
+                new Mirror
+                {
+                    DewPoint   =  1.23,
+                    FrostPoint = -2.34,
+                    Humdity    = 50.00,
+                    WMO = 40.15,
+                    VolumeRatio = 4,
+                    WeightRatio = 4,
+                    AbsoluteHumdity = 1,
+                    SpecificHumdity = 1,
+                    VaporPressure = 1,
+                    HeadPressure= 1,
+                    ExternalTemp= 1,
+                    MirrorTemp = 1,
+                    HeadTemp = 1,
+                    MirrorResistance = 1,
+                    ID= "RH 123",
+                    IDN = "123",
+                    Stable = true
+                }
+            };
+
+            return list;
         }
 
         // Stop monitoring and dispose timer

@@ -1,26 +1,40 @@
-﻿using System;
+﻿/*
+ * todo:
+ * global ceslius setting troubleshooting
+ * Auto detect new devices during runtime
+ * temperature adjustment sequence not working still
+ * Chamber API
+ * PDF report generation
+ * prevent mirror/probes in use on one cal instance from being used on another
+ */
+using DocumentFormat.OpenXml.Vml.Office;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using System.IO.Ports;
-using System.IO;
-using System.Text;
-using System.Threading;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.IO.Ports;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace Rotronic
 {
     internal static class Program
     {
+        public static bool _globalTemperatureC = true;
         private static readonly List<SerialPort> activePorts = new List<SerialPort>();
         private static readonly object portLock = new object();
 
         // New: list of connected probes and synchronization for that list
         private static readonly object probesLock = new object();
         public static List<RotProbe> ConnectedProbes { get; private set; } = new List<RotProbe>();
-        public static List<Mirror> ConnectedMirrors = MirrorData();
+
+        // Mirrors
+        private static readonly object mirrorsLock = new object();
+        public static List<Mirror> ConnectedMirrors { get; private set; } = new List<Mirror>();
 
         // New: timer to periodically refresh data
         private static System.Threading.Timer probeTimer;
@@ -37,28 +51,31 @@ namespace Rotronic
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            // Ensure we will close the ports when the app exits
+            // Ensure we will close the ports when the app exits and turn off mirror control
             Application.ApplicationExit += (s, e) =>
             {
                 StopProbeMonitoring();
+                // attempt to set mirrors control off
+                try { SetAllMirrorControl(false); } catch { }
                 CloseActivePorts();
             };
             AppDomain.CurrentDomain.ProcessExit += (s, e) =>
             {
                 StopProbeMonitoring();
+                try { SetAllMirrorControl(false); } catch { }
                 CloseActivePorts();
             };
-
             // Start discovery + periodic updates
-            StartProbeMonitoring(15000); // 15 seconds
-
+            StartProbeMonitoring(2000); // 15 seconds
             // Create the form instance (calls InitializeComponent)
             var mainForm = new Main();
             Application.Run(mainForm);
         }
 
+
+
         // Start periodic monitoring (threadpool timer)
-        public static void StartProbeMonitoring(int intervalMs = 15000)
+        public static void StartProbeMonitoring(int intervalMs = 2000)
         {
             lock (timerLock)
             {
@@ -72,88 +89,411 @@ namespace Rotronic
             }
         }
 
-        public static List<Mirror> MirrorData()
+        // Helper: send command and read response with polling loop
+        private static string SendRead(SerialPort port, string cmd, int timeoutMs)
         {
-            // PSEUDOCODE / DETAILED PLAN:
-            // - Fix 1: method must be static because it's inside the static class `Program`.
-            // - Fix 2..5: the `Mirror` type in this project does not contain `Temperature` or `Humidity`
-            //   properties (it does contain `Humdity` as used earlier). Avoid assigning non-existent
-            //   properties to compile cleanly.
-            // - Approach:
-            //   1. Make the method `static`.
-            //   2. Create three `Mirror` instances using object initializers.
-            //   3. Only set properties that exist on `Mirror` (use `DewPoint`, `FrostPoint`, `Humdity`).
-            //   4. Return the populated `List<Mirror>`.
-            //
-            // Note: If your `Mirror` class actually defines different property names, replace the
-            // property identifiers below with the correct ones from that class.
-            //*this is a place holder until actual communication is implemented with an actual chilled mirror.
-
-            var list = new List<Mirror>
+            try
             {
-                new Mirror
+                try { port.DiscardInBuffer(); } catch { }
+                port.Write(cmd);
+            }
+            catch (Exception ex)
+            {
+                try { Debug.WriteLine($"SendRead: write failed: {ex}"); } catch { }
+                return string.Empty;
+            }
+
+            var sb = new StringBuilder();
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                try
                 {
-                    DewPoint   =  1.23,
-                    FrostPoint = -2.34,
-                    Humdity    = 50.00,
-                    WMO = 40.15,
-                    VolumeRatio = 4,
-                    WeightRatio = 4,
-                    AbsoluteHumdity = 1,
-                    SpecificHumdity = 1,
-                    VaporPressure = 1,
-                    HeadPressure= 1,
-                    ExternalTemp= 1,
-                    MirrorTemp = 1,
-                    HeadTemp = 1,
-                    MirrorResistance = 1,
-                    ID= "RH 123",
-                    IDN = "123",
-                    Stable = true
-                },
-                new Mirror
-                {
-                    DewPoint   =  1.23,
-                    FrostPoint = -2.34,
-                    Humdity    = 50.00,
-                    WMO = 40.15,
-                    VolumeRatio = 4,
-                    WeightRatio = 4,
-                    AbsoluteHumdity = 1,
-                    SpecificHumdity = 1,
-                    VaporPressure = 1,
-                    HeadPressure= 1,
-                    ExternalTemp= 1,
-                    MirrorTemp = 1,
-                    HeadTemp = 1,
-                    MirrorResistance = 1,
-                    ID= "RH 123",
-                    IDN = "123",
-                    Stable = true
-                },
-                new Mirror
-                {
-                    DewPoint   =  1.23,
-                    FrostPoint = -2.34,
-                    Humdity    = 50.00,
-                    WMO = 40.15,
-                    VolumeRatio = 4,
-                    WeightRatio = 4,
-                    AbsoluteHumdity = 1,
-                    SpecificHumdity = 1,
-                    VaporPressure = 1,
-                    HeadPressure= 1,
-                    ExternalTemp= 1,
-                    MirrorTemp = 1,
-                    HeadTemp = 1,
-                    MirrorResistance = 1,
-                    ID= "RH 123",
-                    IDN = "123",
-                    Stable = true
+                    var chunk = port.ReadExisting();
+                    if (!string.IsNullOrEmpty(chunk))
+                    {
+                        sb.Append(chunk);
+                        // allow remaining bytes to arrive
+                        Thread.Sleep(20);
+                        continue;
+                    }
                 }
+                catch
+                {
+                    // ignore read errors
+                }
+                Thread.Sleep(20);
+            }
+            sw.Stop();
+            return sb.ToString().Trim();
+        }
+
+        // Discover mirrors by scanning COM ports with mirror baud/settings.
+        public static List<Mirror> MirrorComTest()
+        {
+            var result = new List<Mirror>();
+            var ports = SerialPort.GetPortNames();
+
+            if (ports == null || ports.Length == 0)
+                return result;
+
+            foreach (var portName in ports.OrderBy(p => p))
+            {
+                try
+                {
+                    // If an active port exists with same name and different baud -> skip scanning that port
+                    lock (portLock)
+                    {
+                        var existing = activePorts.FirstOrDefault(p => string.Equals(p.PortName, portName, StringComparison.OrdinalIgnoreCase) && p.IsOpen);
+                        if (existing != null && existing.BaudRate != 9600)
+                        {
+                            // port is already opened for another device with different settings - skip it
+                            continue;
+                        }
+                        if (existing != null && existing.BaudRate == 9600)
+                        {
+                            // we can reuse this port instance for discovery
+                            var respMirror = SendRead(existing, "IDN?\r\n", 500);
+                            if (!string.IsNullOrWhiteSpace(respMirror) && respMirror.IndexOf("473", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                var m = new Mirror { ComPort = portName, ID = respMirror, IDN = "473" };
+                                // get serial number
+                                var snMirror = SendRead(existing, "SN?\r\n", 500);
+                                if (!string.IsNullOrWhiteSpace(snMirror))
+                                    m.SerialNumber = snMirror.Trim();
+                                // enable control once
+                                try { existing.Write("Control = 1\r\n"); } catch { }
+                                result.Add(m);
+                            }
+                            continue;
+                        }
+                    }
+
+                    // Create a new SerialPort for testing (do not close if mirror found)
+                    var sp = new SerialPort(portName)
+                    {
+                        BaudRate = 9600,
+                        Parity = Parity.None,
+                        DataBits = 8,
+                        StopBits = StopBits.One,
+                        Handshake = Handshake.None,
+                        ReadTimeout = 500,
+                        WriteTimeout = 500,
+                        Encoding = Encoding.ASCII,
+                        DtrEnable = false,
+                        RtsEnable = false
+                    };
+
+                    try
+                    {
+                        sp.Open();
+                    }
+                    catch (Exception exOpen)
+                    {
+                        try { Debug.WriteLine($"MirrorComTest: Failed to open {portName}: {exOpen}"); } catch { }
+                        try { sp.Dispose(); } catch { }
+                        continue;
+                    }
+
+                    // Clear and send IDN?
+                    try { sp.DiscardInBuffer(); } catch { }
+                    try { sp.Write("IDN?\r\n"); } catch { }
+
+                    var respBuilder = new StringBuilder();
+                    var sw = Stopwatch.StartNew();
+                    while (sw.ElapsedMilliseconds < 500)
+                    {
+                        try
+                        {
+                            var chunk = sp.ReadExisting();
+                            if (!string.IsNullOrEmpty(chunk))
+                            {
+                                respBuilder.Append(chunk);
+                                Thread.Sleep(20);
+                                continue;
+                            }
+                        }
+                        catch { }
+                        Thread.Sleep(20);
+                    }
+                    sw.Stop();
+
+                    var resp = respBuilder.ToString().Trim();
+                    if (!string.IsNullOrWhiteSpace(resp) && resp.IndexOf("473", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        var m = new Mirror { ComPort = portName, ID = resp, IDN = "473" };
+
+                        // ask for SN? once
+                        var sn = SendRead(sp, "SN?\r\n", 500);
+                        if (!string.IsNullOrWhiteSpace(sn))
+                            m.SerialNumber = sn.Trim();
+
+                        // enable control (turn mirror control on)
+                        try { sp.Write("Control = 1\r\n"); } catch { }
+
+                        result.Add(m);
+
+                        // Keep port open by adding to activePorts
+                        lock (portLock)
+                        {
+                            try
+                            {
+                                if (!activePorts.Any(p => string.Equals(p.PortName, sp.PortName, StringComparison.OrdinalIgnoreCase) && p.IsOpen))
+                                {
+                                    activePorts.Add(sp);
+                                }
+                                else
+                                {
+                                    try { sp.Close(); } catch { }
+                                    try { sp.Dispose(); } catch { }
+                                }
+                            }
+                            catch (Exception exAdd)
+                            {
+                                try { Debug.WriteLine($"MirrorComTest: Failed to add {portName} to activePorts: {exAdd}"); } catch { }
+                                try { sp.Close(); } catch { }
+                                try { sp.Dispose(); } catch { }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Not a mirror -> close
+                        try { sp.Close(); } catch { }
+                        try { sp.Dispose(); } catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    try { Debug.WriteLine($"MirrorComTest: exception on port {portName}: {ex}"); } catch { }
+                }
+            }
+
+            return result;
+        }
+
+        private const string FakeMirrorComPort = "__FAKE_MIRROR__";
+
+        /// <summary>
+        /// Add a removable fake mirror for testing UI/logic without touching serial ports.
+        /// Use RemoveFakeMirrors() to remove it and restore normal discovery/update behavior.
+        /// </summary>
+        public static void AddFakeMirror(
+            string idn = "473",
+            double mirrorTemp = 23.000,
+            double humidity = 10.000,
+            double dewPoint = 0.500,
+            string serialNumber = "27-123456",
+            bool stable = true)
+        {
+            var fake = new Mirror
+            {
+                ComPort = FakeMirrorComPort,
+                IDN = idn,
+                ID = idn,
+                MirrorTemp = mirrorTemp,
+                Humdity = humidity,
+                DewPoint = dewPoint,
+                SerialNumber = serialNumber,
+                Stable = stable
             };
 
-            return list;
+            lock (mirrorsLock)
+            {
+                if (ConnectedMirrors == null)
+                    ConnectedMirrors = new List<Mirror>();
+
+                // If a fake mirror with the same serial number exists, update its values in-place so any UI references stay valid.
+                if (!string.IsNullOrWhiteSpace(serialNumber))
+                {
+                    var existing = ConnectedMirrors.FirstOrDefault(m =>
+                        string.Equals(m?.SerialNumber, serialNumber, StringComparison.OrdinalIgnoreCase));
+                    if (existing != null)
+                    {
+                        // Update the existing fake mirror fields in-place so any UI references stay valid.
+                        existing.IDN = fake.IDN;
+                        existing.ID = fake.ID;
+                        existing.MirrorTemp = fake.MirrorTemp;
+                        existing.Humdity = fake.Humdity;
+                        existing.DewPoint = fake.DewPoint;
+                        existing.Stable = fake.Stable;
+                        try { Debug.WriteLine("AddFakeMirror: updated existing fake mirror"); } catch { }
+                        return;
+                    }
+                }
+
+                // No existing mirror with that serial -> add new fake mirror.
+                ConnectedMirrors.Add(fake);
+            }
+
+            try { Debug.WriteLine("AddFakeMirror: fake mirror added"); } catch { }
+        }
+
+        /// <summary>
+        /// Remove any fake mirrors previously added with `AddFakeMirror`.
+        /// </summary>
+        public static void RemoveFakeMirrors()
+        {
+            lock (mirrorsLock)
+            {
+                if (ConnectedMirrors == null || ConnectedMirrors.Count == 0)
+                    return;
+
+                ConnectedMirrors.RemoveAll(m => string.Equals(m?.ComPort, FakeMirrorComPort, StringComparison.OrdinalIgnoreCase));
+            }
+            try { Debug.WriteLine("RemoveFakeMirrors: fake mirror(s) removed"); } catch { }
+        }
+
+        /// <summary>
+        /// Update all fake mirrors previously added with AddFakeMirror.
+        /// This updates fields in-place so any UI references to the Mirror instances will reflect the changes.
+        /// </summary>
+        public static void UpdateAllFakeMirrors(double mirrorTemp, double humidity, double dewPoint, string idn = null, bool? stable = null)
+        {
+            lock (mirrorsLock)
+            {
+                if (ConnectedMirrors == null || ConnectedMirrors.Count ==0)
+                    return;
+
+                foreach (var m in ConnectedMirrors.Where(m => string.Equals(m?.ComPort, FakeMirrorComPort, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (m == null)
+                        continue;
+
+                    if (!string.IsNullOrEmpty(idn))
+                        m.IDN = idn;
+                    m.MirrorTemp = mirrorTemp;
+                    m.Humdity = humidity;
+                    m.DewPoint = dewPoint;
+                    if (stable.HasValue)
+                        m.Stable = stable.Value;
+                }
+            }
+            try { Debug.WriteLine("UpdateAllFakeMirrors: updated fake mirrors"); } catch { }
+        }
+
+        // Update DP? and Tx? for known mirrors. Works with real mirrors (serial IO) and with fake mirrors
+        // whose ComPort == FakeMirrorComPort (no IO, just preserve supplied values).
+        public static List<Mirror> UpdateMirrorData(List<Mirror> mirrors)
+        {
+            var updated = new List<Mirror>();
+            if (mirrors == null || mirrors.Count == 0)
+                return updated;
+
+            foreach (var m in mirrors)
+            {
+                if (m == null || string.IsNullOrWhiteSpace(m.ComPort))
+                    continue;
+
+                // If this is a fake mirror marker, skip serial IO and return the instance as-is
+                if (string.Equals(m.ComPort, FakeMirrorComPort, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Ensure basic fields exist (defensive)
+                    if (string.IsNullOrEmpty(m.IDN))
+                        m.IDN = "473";
+                    // Add to updated list unchanged (no serial IO)
+                    updated.Add(m);
+                    continue;
+                }
+
+                SerialPort sp = null;
+                lock (portLock)
+                {
+                    sp = activePorts.FirstOrDefault(p => string.Equals(p.PortName, m.ComPort, StringComparison.OrdinalIgnoreCase) && p.IsOpen);
+                }
+
+                if (sp == null)
+                {
+                    try { Debug.WriteLine($"UpdateMirrorData: no active port for {m.ComPort}"); } catch { }
+                    continue;
+                }
+
+                try
+                {
+                    // Query dew point
+                    var dpResp = SendRead(sp, "DP?\r", 500);
+                    if (!string.IsNullOrWhiteSpace(dpResp))
+                    {
+                        double dp;
+                        if (double.TryParse(dpResp.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out dp))
+                            m.DewPoint = dp;
+                    }
+                    // Query humidity
+                    var hum = SendRead(sp, "RH?\r", 500);
+                    if (!string.IsNullOrWhiteSpace(hum))
+                    {
+                        double dp;
+                        if (double.TryParse(hum.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out dp))
+                            m.Humdity = dp;
+                    }
+
+                    // Query mirror temp (Tx? uses external temp or mirror temp depending on device)
+                    var tmResp = SendRead(sp, "Tx?\r", 500);
+                    if (!string.IsNullOrWhiteSpace(tmResp))
+                    {
+                        double tm;
+                        if (double.TryParse(tmResp.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out tm))
+                            m.MirrorTemp = tm;
+                    }
+
+                    // Optionally query Stable? if device supports
+                    var stableResp = SendRead(sp, "Stable?\r\n", 250);
+                    if (!string.IsNullOrWhiteSpace(stableResp))
+                    {
+                        var stab = stableResp.Trim();
+                        if (stab == "1" || stab.Equals("true", StringComparison.OrdinalIgnoreCase))
+                            m.Stable = true;
+                        else if (stab == "0" || stab.Equals("false", StringComparison.OrdinalIgnoreCase))
+                            m.Stable = false;
+                    }
+
+                    updated.Add(m);
+                }
+                catch (Exception ex)
+                {
+                    try { Debug.WriteLine($"UpdateMirrorData: failed for {m.ComPort}: {ex}"); } catch { }
+                }
+            }
+
+            return updated;
+        }
+
+        // Set control for all discovered mirrors (true -> 1, false -> 0)
+        private static void SetAllMirrorControl(bool on)
+        {
+            List<Mirror> snapshot;
+            lock (mirrorsLock)
+            {
+                snapshot = ConnectedMirrors?.ToList() ?? new List<Mirror>();
+            }
+
+            foreach (var m in snapshot)
+            {
+                if (m == null || string.IsNullOrWhiteSpace(m.ComPort))
+                    continue;
+
+                SerialPort sp = null;
+                lock (portLock)
+                {
+                    sp = activePorts.FirstOrDefault(p => string.Equals(p.PortName, m.ComPort, StringComparison.OrdinalIgnoreCase) && p.IsOpen);
+                }
+
+                if (sp == null)
+                    continue;
+
+                try
+                {
+                    var cmd = on ? "Control = 1\r" : "Control = 0\r";
+                    sp.Write(cmd);
+                }
+                catch { }
+            }
+        }
+
+        public static List<RotProbe> MirrorData()
+        {
+            // keep a simple placeholder; real discovery happens in MonitorCallback via MirrorComTest
+            return new List<RotProbe>();
         }
 
         // Stop monitoring and dispose timer
@@ -192,7 +532,15 @@ namespace Rotronic
             }
         }
 
-        // Timer callback: discover on first run (ComTest), otherwise update existing
+        public static List<Mirror> GetConnectedMirrorsSnapshot()
+        {
+            lock (mirrorsLock)
+            {
+                return ConnectedMirrors?.ToList() ?? new List<Mirror>();
+            }
+        }
+
+        // Timer callback: discover on first run (ComTest), otherwise update existing (probes + mirrors)
         private static void MonitorCallback(object state)
         {
             // Prevent overlapping timer callbacks
@@ -204,7 +552,25 @@ namespace Rotronic
 
             try
             {
-                // If no probes discovered yet, run ComTest to populate list and active ports
+                // MIRRORS DISCOVERY (moved before probes so mirrors get first claim on ports)
+                lock (mirrorsLock)
+                {
+                    if (ConnectedMirrors == null || ConnectedMirrors.Count == 0)
+                    {
+                        try
+                        {
+                            var discoveredMirrors = MirrorComTest() ?? new List<Mirror>();
+                            ConnectedMirrors = discoveredMirrors;
+                            try { Debug.WriteLine($"MonitorCallback: discovered {discoveredMirrors.Count} mirrors"); } catch { }
+                        }
+                        catch (Exception ex)
+                        {
+                            try { Debug.WriteLine($"MonitorCallback: MirrorComTest failed: {ex}"); } catch { }
+                        }
+                    }
+                }
+
+                // PROBES DISCOVERY
                 lock (probesLock)
                 {
                     if (ConnectedProbes == null || ConnectedProbes.Count == 0)
@@ -214,56 +580,104 @@ namespace Rotronic
                             var discovered = ComTest() ?? new List<RotProbe>();
                             ConnectedProbes = discovered;
                             try { Debug.WriteLine($"MonitorCallback: discovered {discovered.Count} probes"); } catch { }
-                            return;
                         }
                         catch (Exception ex)
                         {
                             try { Debug.WriteLine($"MonitorCallback: ComTest failed: {ex}"); } catch { }
-                            return;
                         }
                     }
                 }
 
                 // Otherwise, update data for existing probes
-                List<RotProbe> snapshot;
+                List<RotProbe> probeSnapshot;
                 lock (probesLock)
                 {
                     // Work on a shallow copy to avoid holding lock during IO
-                    snapshot = ConnectedProbes.ToList();
+                    probeSnapshot = ConnectedProbes.ToList();
                 }
 
-                List<RotProbe> updated;
+                List<RotProbe> updatedProbes = null;
                 try
                 {
-                    updated = UpdateData(snapshot) ?? new List<RotProbe>();
+                    updatedProbes = UpdateData(probeSnapshot) ?? new List<RotProbe>();
                 }
                 catch (Exception ex)
                 {
                     try { Debug.WriteLine($"MonitorCallback: UpdateData threw: {ex}"); } catch { }
-                    return;
                 }
 
-                if (updated.Count == 0)
-                    return;
-
-                // Merge updated probes into the main ConnectedProbes list
-                lock (probesLock)
+                if (updatedProbes != null && updatedProbes.Count > 0)
                 {
-                    foreach (var up in updated)
+                    // Merge updated probes into the main ConnectedProbes list
+                    lock (probesLock)
                     {
-                        if (up == null || string.IsNullOrWhiteSpace(up.ComPort))
-                            continue;
+                        foreach (var up in updatedProbes)
+                        {
+                            if (up == null || string.IsNullOrWhiteSpace(up.ComPort))
+                                continue;
 
-                        var idx = ConnectedProbes.FindIndex(p => string.Equals(p?.ComPort, up.ComPort, StringComparison.OrdinalIgnoreCase));
-                        if (idx >= 0)
-                        {
-                            // Replace reference so UI consumers see the updated object instance
-                            ConnectedProbes[idx] = up;
+                            var idx = ConnectedProbes.FindIndex(p => string.Equals(p?.ComPort, up.ComPort, StringComparison.OrdinalIgnoreCase));
+                            if (idx >= 0)
+                            {
+                                // Replace reference so UI consumers see the updated object instance
+                                ConnectedProbes[idx] = up;
+                            }
+                            else
+                            {
+                                // New probe discovered during update
+                                ConnectedProbes.Add(up);
+                            }
                         }
-                        else
+                    }
+                }
+
+                // Update mirrors periodically (DP? and Tx?)
+                List<Mirror> mirrorSnapshot;
+                lock (mirrorsLock)
+                {
+                    mirrorSnapshot = ConnectedMirrors?.ToList() ?? new List<Mirror>();
+                }
+
+                if (mirrorSnapshot != null && mirrorSnapshot.Count > 0)
+                {
+                    var updatedMirrors = UpdateMirrorData(mirrorSnapshot);
+                    if (updatedMirrors != null && updatedMirrors.Count > 0)
+                    {
+                        lock (mirrorsLock)
                         {
-                            // New probe discovered during update
-                            ConnectedProbes.Add(up);
+                            foreach (var um in updatedMirrors)
+                            {
+                                if (um == null || string.IsNullOrWhiteSpace(um.ComPort))
+                                    continue;
+
+                                // Prefer to match by SerialNumber when available (fake mirrors share the same ComPort)
+                                int idx = -1;
+                                if (!string.IsNullOrWhiteSpace(um.SerialNumber))
+                                {
+                                    idx = ConnectedMirrors.FindIndex(x => string.Equals(x?.SerialNumber, um.SerialNumber, StringComparison.OrdinalIgnoreCase));
+                                }
+
+                                // Fallback: try to match by reference (updatedMirrors may contain same object instances)
+                                if (idx <0)
+                                {
+                                    idx = ConnectedMirrors.FindIndex(x => Object.ReferenceEquals(x, um));
+                                }
+
+                                // Final fallback: match by ComPort (legacy behavior) only if no serial/reference match
+                                if (idx <0)
+                                {
+                                    idx = ConnectedMirrors.FindIndex(x => string.Equals(x?.ComPort, um.ComPort, StringComparison.OrdinalIgnoreCase));
+                                }
+
+                                if (idx >=0)
+                                {
+                                    ConnectedMirrors[idx] = um;
+                                }
+                                else
+                                {
+                                    ConnectedMirrors.Add(um);
+                                }
+                            }
                         }
                     }
                 }
@@ -277,7 +691,7 @@ namespace Rotronic
                 // Re-enable the periodic timer (use same interval you started with)
                 try
                 {
-                    probeTimer?.Change(15000, 15000); // adjust interval if you changed it elsewhere
+                    probeTimer?.Change(2000, 2000); // adjust interval if you changed it elsewhere
                 }
                 catch { }
             }
@@ -285,27 +699,6 @@ namespace Rotronic
 
         private static RotProbe CalibrationCoefficients(RotProbe probe)
         {
-            /*
-            Pseudocode / Plan (detailed):
-            - Validate probe and locate its open SerialPort in activePorts.
-            - Define SendRead(port, cmd, timeoutMs):
-              - Discard input buffer, write command, then poll ReadExisting until timeout collecting chunks.
-            - Define ParseFourByteFloatFromResponse(response):
-              - If empty -> NaN.
-              - Extract payload after '{', trim trailing braces/CR/LF.
-              - Attempt to find four consecutive numeric byte tokens.
-                - Split payload on ';' using StringSplitOptions.None to preserve empty positions.
-                - For each candidate window of 4 segments:
-                  - From each segment, extract the first numeric substring (1-3 digits) if present.
-                  - Try parse each numeric substring to int and ensure 0..255.
-                  - If all 4 succeed, use those values as bytes (device sends big-endian).
-                - If no such 4-segment window found, fallback to scanning the entire payload
-                  for numeric tokens (Regex.Matches) and use the first 4 matches.
-              - Convert the 4 bytes (big-endian) to a Single, handling machine endianness, return as double or NaN on error.
-            - For each address in addressMap:
-              - Build ERD command, call SendRead, parse float, assign to probe fields.
-            - Return probe.
-            */
             if (probe == null)
                 return null;
 
@@ -526,30 +919,6 @@ namespace Rotronic
         // ComTest now returns a list of RotProbe objects parsed from device responses.
         public static List<RotProbe> ComTest()
         {
-            // Pseudocode / plan (detailed):
-            // 1. Enumerate serial ports and return an empty list if none found.
-            // 2. For each port:
-            //    a. Skip if already open and tracked in activePorts.
-            //    b. Create and open a SerialPort with desired settings.
-            //    c. Clear input buffer and send discovery command "{ 99RDD}\r".
-            //    d. Read response using a short polling loop collecting chunks.
-            //    e. If a response was received:
-            //         i. Trim the response and parse it to a RotProbe via ParseResponseToRotProbe.
-            //        ii. If parsing succeeded, add the RotProbe to results.
-            //       iii. Keep the underlying SerialPort open by adding it to activePorts (avoid duplicates).
-            //        iv. If parsing failed, close and dispose the SerialPort instance.
-            //    f. If no response received, close and dispose the SerialPort instance.
-            //    g. Catch and log non-fatal exceptions and continue to the next port.
-            // 3. AFTER scanning all ports, iterate the discovered RotProbe list and call CalibrationCoefficients
-            //    for each probe to fetch/assign calibration values. Do this sequentially with try/catch
-            //    since CalibrationCoefficients uses shared serial ports and is IO-bound; assigning the
-            //    returned value back into the list if a new object is returned.
-            // 4. Return the (possibly updated) results list.
-            //
-            // Rationale: calling CalibrationCoefficients after discovery ensures ports remain open (if kept)
-            // and that parsing logic is separated from calibration reads. Sequential calls are safer here
-            // because CalibrationCoefficients expects the corresponding SerialPort to be present in activePorts.
-
             string command = "{ 99RDD}\r";
             var ports = SerialPort.GetPortNames();
 
@@ -569,6 +938,15 @@ namespace Rotronic
                     lock (portLock)
                     {
                         if (activePorts.Any(p => string.Equals(p.PortName, portName, StringComparison.OrdinalIgnoreCase) && p.IsOpen))
+                        {
+                            continue;
+                        }
+                    }
+
+                    // Skip ports already known as mirrors to avoid stomping the mirror connection
+                    lock (mirrorsLock)
+                    {
+                        if (ConnectedMirrors != null && ConnectedMirrors.Any(m => string.Equals(m.ComPort, portName, StringComparison.OrdinalIgnoreCase)))
                         {
                             continue;
                         }
@@ -703,7 +1081,6 @@ namespace Rotronic
             }
 
             // Run CalibrationCoefficients for each discovered probe.
-            // Use index-based loop so we can replace the item if CalibrationCoefficients returns a new object.
             for (int i = 0; i < results.Count; i++)
             {
                 try
@@ -855,20 +1232,20 @@ namespace Rotronic
             {
                 rp.Humidity = parseDoubleOrNaN(parts[1]);
             }
-            // parts[2] = HumdityUnit
+            // parts[2] = HumidityUnit
             if (parts.Length > 2)
             {
-                rp.HumdityUnit = parts[2];
+                rp.HumidityUnit = parts[2];
             }
             // parts[3] = HumidityAlarm (string "000" expected)
             if (parts.Length > 3)
             {
                 rp.HumidityAlarm = !string.Equals(parts[3], "000", StringComparison.OrdinalIgnoreCase);
             }
-            // parts[4] = HumdityTrend
+            // parts[4] = HumidityTrend
             if (parts.Length > 4 && !string.IsNullOrEmpty(parts[4]))
             {
-                rp.HumdityTrend = parts[4][0];
+                rp.HumidityTrend = parts[4][0];
             }
 
             // parts[5] = Temperature
@@ -876,11 +1253,18 @@ namespace Rotronic
             {
                 rp.Temperature = parseDoubleOrNaN(parts[5]);
             }
-            // parts[6] = TemperatureUnit
+
             if (parts.Length > 6)
             {
-                rp.TemperatureUnit = parts[6];
+                // Replace any '?' placeholder with the Unicode degree symbol U+00B0
+                var unit = parts[6];
+                if (!string.IsNullOrEmpty(unit))
+                {
+                    unit = unit.Replace('?', '\u00B0');
+                }
+                rp.TemperatureUnit = unit;
             }
+
             // parts[7] = TemperatureAlarm
             if (parts.Length > 7)
             {
@@ -943,7 +1327,12 @@ namespace Rotronic
             {
                 rp.AlarmByte = parts[18];
             }
-
+            if (rp.TemperatureUnit == "°F" && _globalTemperatureC)
+            {
+                rp.CelsiusHelper = true;
+                rp.TemperatureUnit = "°C";
+                rp.Temperature = Math.Round((rp.Temperature - 32) * 5.0 / 9.0, 2);
+            }
             return rp;
         }
 
@@ -963,10 +1352,10 @@ namespace Rotronic
         //   - Map expected segments to fields:
         //       0: header segment like "F00tst 17822" -> extract first integer => HumidityCount
         //       1: HumdityRaw (double)
-        //       2: HumdityFactoryCorrection (double)
-        //       3: HumdityUserCorrection (double)
-        //       4: HumdityTemperatureCorrection (double)
-        //       5: HumdityDriftCorrection (double)
+        //       2: HumidityFactoryCorrection (double)
+        //       3: HumidityUserCorrection (double)
+        //       4: HumidityTemperatureCorrection (double)
+        //       5: HumidityDriftCorrection (double)
         //       6: Humidity (double)
         //       7: TemperatureCount (int) (may contain leading zeros)
         //       8: Resistance (double)
@@ -1133,13 +1522,13 @@ namespace Rotronic
                     if (parts.Length > 1)
                         probe.HumdityRaw = parseDoubleOrNaN(parts[1]);
                     if (parts.Length > 2)
-                        probe.HumdityFactoryCorrection = parseDoubleOrNaN(parts[2]);
+                        probe.HumidityFactoryCorrection = parseDoubleOrNaN(parts[2]);
                     if (parts.Length > 3)
-                        probe.HumdityUserCorrection = parseDoubleOrNaN(parts[3]);
+                        probe.HumidityUserCorrection = parseDoubleOrNaN(parts[3]);
                     if (parts.Length > 4)
-                        probe.HumdityTemperatureCorrection = parseDoubleOrNaN(parts[4]);
+                        probe.HumidityTemperatureCorrection = parseDoubleOrNaN(parts[4]);
                     if (parts.Length > 5)
-                        probe.HumdityDriftCorrection = parseDoubleOrNaN(parts[5]);
+                        probe.HumidityDriftCorrection = parseDoubleOrNaN(parts[5]);
                     if (parts.Length > 6)
                         probe.Humidity = parseDoubleOrNaN(parts[6]);
 
@@ -1157,7 +1546,15 @@ namespace Rotronic
                         probe.Resistance = parseDoubleOrNaN(parts[8]);
                     if (parts.Length > 9)
                         probe.Temperature = parseDoubleOrNaN(parts[9]);
-
+                    if (_globalTemperatureC && probe.CelsiusHelper)
+                    {
+                        probe.Temperature = Math.Round((probe.Temperature - 32) * 5.0 / 9.0, 2);
+                        probe.TemperatureUnit = "°C";
+                    }
+                    else if (!_globalTemperatureC && probe.CelsiusHelper)
+                    {
+                        probe.TemperatureUnit = "°F";
+                    }
                     // Add updated probe to results
                     updatedProbes.Add(probe);
                 }
@@ -1208,6 +1605,232 @@ namespace Rotronic
 
                 activePorts.Clear();
             }
+        }
+
+        // PSEUDOCODE / DETAILED PLAN (for new fake probe helpers):
+        // - Add a constant FakeProbeComPort = "__FAKE_PROBE__".
+        // - Implement AddFakeProbe(...) with parameters to allow setting common RotProbe fields:
+        //     - probeType, probeAddress, deviceType, humidity, temperature, temperatureUnit,
+        //       calculatedParameter, calculatedValue, deviceModel, deviceName, serialNumber.
+        //   Steps inside AddFakeProbe:
+        //     - Build a new RotProbe instance with ComPort = FakeProbeComPort and populate fields.
+        //     - If temperatureUnit == "°F" and _globalTemperatureC is true -> mark CelsiusHelper and convert to °C.
+        //     - Lock probesLock, ensure ConnectedProbes list exists.
+        //     - If serialNumber provided and a fake probe with same serial exists -> update that instance in-place and return.
+        //     - Otherwise add the new fake probe to ConnectedProbes.
+        //     - Debug.WriteLine for visibility.
+        // - Implement RemoveFakeProbes():
+        //     - Lock probesLock and remove all probes whose ComPort equals FakeProbeComPort.
+        //     - Debug.WriteLine.
+        // - Implement UpdateAllFakeProbes(...) to update values of all fake probes in-place:
+        //     - Lock probesLock; iterate ConnectedProbes where ComPort == FakeProbeComPort and set fields provided.
+        //     - Handle temperature unit/ conversion and CelsiusHelper similarly.
+        //     - Debug.WriteLine.
+        // - Use the same locking & debug style as existing mirror helpers so UI references remain valid.
+
+        private const string FakeProbeComPort = "__FAKE_PROBE__";
+
+        /// <summary>
+        /// Add a removable fake RotProbe for testing UI/logic without touching serial ports.
+        /// Use RemoveFakeProbes() to remove them and restore normal discovery/update behavior.
+        /// If serialNumber matches an existing fake probe, update that instance in-place.
+        /// </summary>
+        public static void AddFakeProbe(
+            string ComPort = "COM",
+            string ProbeType = "001",
+            int HumidityCount = 19300,
+            double HumdityRaw = 10.0,
+            double HumidityUserCorrection = 0.0,
+            double HumidityTemperatureCorrection = 0.0,
+            double HumidityDriftCorrection = 0.0,
+            string HumidityUnit = "%rh",
+            bool HumidityAlarm = false,
+            char HumidityTrend = '=',
+            double Temperature = 23.0,
+            int TemperatureCount = 12345,
+            double Resistance = 109.52,
+            double PT100CoeffA = 0.003908299841,
+            double PT100CoeffB = -0.000000577499974951934,
+            double PT100CoeffC = 4.79382386195842E-21,
+            double TempOffset = 0.0,
+            double TempConversion = 364.4709167,
+            string TemperatureUnit = "°C",
+            bool TemperatureAlarm = false,
+            char TemperatureTrend = '=',
+            string CalculatedParameter = "n.c.",
+            double CalculatedValue = 0.0,
+            string CalculatedUnit = "°C",
+            bool CalculatedAlarm = false,
+            char CalculatedTrend = '=',
+            string DeviceModel = "Fake",
+            string FirmwareVersion = "V1.2",
+            string SerialNumber = "000001",
+            string DeviceName = "Fake Probe",
+            string AlarmByte = "00",
+            char DeviceType = 'F',
+            string ProbeAddress = "00")
+
+        {
+            var fake = new RotProbe
+            {
+                ComPort = ComPort,
+                ProbeType = ProbeType,
+                HumidityCount = HumidityCount,
+                HumdityRaw = HumdityRaw,
+                HumidityUserCorrection = HumidityUserCorrection,
+                HumidityTemperatureCorrection = HumidityTemperatureCorrection,
+                HumidityDriftCorrection = HumidityDriftCorrection,
+                HumidityUnit = HumidityUnit,
+                HumidityAlarm = HumidityAlarm,
+                HumidityTrend = HumidityTrend,
+                Temperature = Temperature,
+                TemperatureCount = TemperatureCount,
+                Resistance = Resistance,
+                PT100CoeffA = PT100CoeffA,
+                PT100CoeffB = PT100CoeffB,
+                PT100CoeffC = PT100CoeffC,
+                TempOffset = TempOffset,
+                TempConversion = TempConversion,
+                TemperatureUnit = TemperatureUnit,
+                TemperatureAlarm = TemperatureAlarm,
+                TemperatureTrend = TemperatureTrend,
+                CalculatedParameter = CalculatedParameter,
+                CalculatedValue = CalculatedValue,
+                CalculatedUnit = CalculatedUnit,
+                CalculatedAlarm = CalculatedAlarm,
+                CalculatedTrend = CalculatedTrend,
+                DeviceModel = DeviceModel,
+                FirmwareVersion = FirmwareVersion,
+                SerialNumber = SerialNumber,
+                DeviceName = DeviceName,
+                AlarmByte = AlarmByte,
+                DeviceType = DeviceType,
+                ProbeAddress = ProbeAddress
+            };
+
+            // Mirror existing behavior: if probe reports °F but global setting is Celsius, mark CelsiusHelper and convert
+            if (string.Equals(TemperatureUnit, "°F", StringComparison.Ordinal) && _globalTemperatureC)
+            {
+                fake.CelsiusHelper = true;
+                fake.TemperatureUnit = "°C";
+                fake.Temperature = Math.Round((fake.Temperature - 32) * 5.0 / 9.0, 2);
+            }
+
+            lock (probesLock)
+            {
+                if (ConnectedProbes == null)
+                    ConnectedProbes = new List<RotProbe>();
+
+                // If a fake probe with the same serial number exists, update its values in-place so any UI references stay valid.
+                if (!string.IsNullOrWhiteSpace(SerialNumber))
+                {
+                    var existing = ConnectedProbes.FirstOrDefault(p =>
+                        string.Equals(p?.SerialNumber, SerialNumber, StringComparison.OrdinalIgnoreCase));
+                    if (existing != null)
+                    {
+                        existing.ProbeType = fake.ProbeType;
+                        existing.ProbeAddress = fake.ProbeAddress;
+                        existing.DeviceType = fake.DeviceType;
+                        existing.Humidity = fake.Humidity;
+                        existing.Temperature = fake.Temperature;
+                        existing.TemperatureUnit = fake.TemperatureUnit;
+                        existing.CalculatedParameter = fake.CalculatedParameter;
+                        existing.CalculatedValue = fake.CalculatedValue;
+                        existing.DeviceModel = fake.DeviceModel;
+                        existing.DeviceName = fake.DeviceName;
+                        existing.CelsiusHelper = fake.CelsiusHelper;
+                        // keep ComPort and SerialNumber unchanged (should already match)
+                        try { Debug.WriteLine("AddFakeProbe: updated existing fake probe"); } catch { }
+                        return;
+                    }
+                }
+
+                // No existing fake with that serial -> add new fake probe.
+                ConnectedProbes.Add(fake);
+            }
+
+            try { Debug.WriteLine("AddFakeProbe: fake probe added"); } catch { }
+        }
+
+        /// <summary>
+        /// Remove any fake probes previously added with AddFakeProbe.
+        /// </summary>
+        public static void RemoveFakeProbes()
+        {
+            lock (probesLock)
+            {
+                if (ConnectedProbes == null || ConnectedProbes.Count == 0)
+                    return;
+
+                ConnectedProbes.RemoveAll(p => string.Equals(p?.ComPort, FakeProbeComPort, StringComparison.OrdinalIgnoreCase));
+            }
+            try { Debug.WriteLine("RemoveFakeProbes: fake probe(s) removed"); } catch { }
+        }
+
+        /// <summary>
+        /// Update all fake probes previously added with AddFakeProbe.
+        /// This updates fields in-place so any UI references to the RotProbe instances will reflect the changes.
+        /// Only non-null parameters are applied (for nullable types).
+        /// </summary>
+        public static void UpdateAllFakeProbes(
+            double? humidity = null,
+            double? temperature = null,
+            string temperatureUnit = null,
+            string probeType = null,
+            string probeAddress = null,
+            string calculatedParameter = null,
+            double? calculatedValue = null,
+            string deviceModel = null,
+            string deviceName = null)
+        {
+            lock (probesLock)
+            {
+                if (ConnectedProbes == null || ConnectedProbes.Count == 0)
+                    return;
+
+                foreach (var p in ConnectedProbes.Where(p => string.Equals(p?.ComPort, FakeProbeComPort, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (p == null)
+                        continue;
+
+                    if (!string.IsNullOrEmpty(probeType))
+                        p.ProbeType = probeType;
+                    if (!string.IsNullOrEmpty(probeAddress))
+                        p.ProbeAddress = probeAddress;
+                    if (!string.IsNullOrEmpty(deviceModel))
+                        p.DeviceModel = deviceModel;
+                    if (!string.IsNullOrEmpty(deviceName))
+                        p.DeviceName = deviceName;
+                    if (humidity.HasValue)
+                        p.Humidity = humidity.Value;
+                    if (calculatedParameter != null)
+                        p.CalculatedParameter = calculatedParameter;
+                    if (calculatedValue.HasValue)
+                        p.CalculatedValue = calculatedValue.Value;
+
+                    if (temperature.HasValue)
+                        p.Temperature = temperature.Value;
+
+                    if (!string.IsNullOrEmpty(temperatureUnit))
+                    {
+                        // If unit is F but global is C, set CelsiusHelper and convert to °C to match existing UpdateData behavior
+                        if (string.Equals(temperatureUnit, "°F", StringComparison.Ordinal) && _globalTemperatureC)
+                        {
+                            p.CelsiusHelper = true;
+                            p.TemperatureUnit = "°C";
+                            // Only convert if we have a numeric temperature value
+                            if (!double.IsNaN(p.Temperature))
+                                p.Temperature = Math.Round((p.Temperature - 32) * 5.0 / 9.0, 2);
+                        }
+                        else
+                        {
+                            p.CelsiusHelper = false;
+                            p.TemperatureUnit = temperatureUnit;
+                        }
+                    }
+                }
+            }
+            try { Debug.WriteLine("UpdateAllFakeProbes: updated fake probes"); } catch { }
         }
     }
 }

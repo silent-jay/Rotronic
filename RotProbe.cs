@@ -13,13 +13,13 @@ namespace Rotronic
         public double Humidity { get; set; }
         public int HumidityCount { get; set; }
         public double HumdityRaw { get; set; }
-        public double HumdityFactoryCorrection { get; set; }
-        public double HumdityUserCorrection { get; set; }
-        public double HumdityTemperatureCorrection { get; set; }
-        public double HumdityDriftCorrection { get; set; }
-        public string HumdityUnit { get; set; }
+        public double HumidityFactoryCorrection { get; set; }
+        public double HumidityUserCorrection { get; set; }
+        public double HumidityTemperatureCorrection { get; set; }
+        public double HumidityDriftCorrection { get; set; }
+        public string HumidityUnit { get; set; }
         public bool HumidityAlarm { get; set; }
-        public char HumdityTrend { get; set; }
+        public char HumidityTrend { get; set; }
         public double Temperature { get; set; }
         public int TemperatureCount { get; set; }
         public double Resistance { get; set; }
@@ -43,6 +43,7 @@ namespace Rotronic
         public string AlarmByte { get; set; }
         public char DeviceType { get; set; }
         public string ProbeAddress { get; set; }
+        public bool CelsiusHelper { get; set; }
 
 
     }

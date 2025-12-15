@@ -1,9 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Threading.Tasks;
 using System.Globalization;
 
 namespace Rotronic
@@ -29,6 +24,10 @@ namespace Rotronic
          - Use InvariantCulture for all ToString calls to keep formatting consistent across locales.
          - Keep the large command reference comment intact.
         */
+
+        // Added: ComPort (port name) and SerialNumber (SN?) as requested
+        public string ComPort { get; set; }
+        public string SerialNumber { get; set; }
 
         public double DewPoint { get; set; }
         public double FrostPoint { get; set; }
@@ -140,6 +139,9 @@ namespace Rotronic
                   Example response: "473"
                   Mapped property: IDN (string)
 
+         SN?    - Returns serial number string (e.g. "13-0418")
+                  Mapped property: SerialNumber (string)
+
          Stability Flag
          --------------
          - Some instruments provide a stability indicator (e.g., stable/unstable mirror).
@@ -149,7 +151,7 @@ namespace Rotronic
 
          Usage Notes
          -----------
-         - Queries are typically sent as ASCII strings terminated with a newline (device-dependent).
+         - Queries are typically sent as ASCII strings terminated with a newline/CR (device-dependent).
          - Responses may need parsing and unit conversion before assigning to properties.
          - Watch for locale-specific decimal separators when parsing numeric replies.
          - Validate ranges (e.g., RH 0..100%) and handle out-of-range or error responses gracefully.

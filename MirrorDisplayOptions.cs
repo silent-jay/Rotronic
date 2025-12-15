@@ -28,6 +28,7 @@ namespace Rotronic
             ExternalResistance,
             ID,
             IDN,
+            SerialNumber,    // ADDED: expose mirror serial number in display options
             Stable
         }
 
@@ -67,6 +68,7 @@ namespace Rotronic
             // sensible defaults: visibility, order, header text and width (pixels)
             d[Field.ID] = new ColumnOption(true, 1, "ID", 120);
             d[Field.IDN] = new ColumnOption(false, 0, "IDN", 80);
+            d[Field.SerialNumber] = new ColumnOption(false, 0, "Serial Number", 120); // default hidden
 
             d[Field.DewPoint] = new ColumnOption(true, 2, "Dew Point", 90);
             d[Field.FrostPoint] = new ColumnOption(false, 0, "Frost Point", 90);

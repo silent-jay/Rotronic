@@ -37,11 +37,14 @@
             this.headerViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.mirrorViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.celsiusToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.validationToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.listViewRotProbe = new System.Windows.Forms.ListView();
             this.label1 = new System.Windows.Forms.Label();
             this.listViewMirror = new System.Windows.Forms.ListView();
             this.label2 = new System.Windows.Forms.Label();
-            this.validationToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.hygrogenIPConfigToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.listView1 = new System.Windows.Forms.ListView();
+            this.label3 = new System.Windows.Forms.Label();
             this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -54,7 +57,7 @@
             this.optionsToolStripMenuItem});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
-            this.menuStrip1.Size = new System.Drawing.Size(1935, 33);
+            this.menuStrip1.Size = new System.Drawing.Size(1939, 33);
             this.menuStrip1.TabIndex = 1;
             this.menuStrip1.Text = "menuStrip1";
             // 
@@ -95,7 +98,8 @@
             this.headerViewToolStripMenuItem,
             this.mirrorViewToolStripMenuItem,
             this.celsiusToolStripMenuItem,
-            this.validationToolStripMenuItem});
+            this.validationToolStripMenuItem,
+            this.hygrogenIPConfigToolStripMenuItem});
             this.optionsToolStripMenuItem.Name = "optionsToolStripMenuItem";
             this.optionsToolStripMenuItem.Size = new System.Drawing.Size(92, 29);
             this.optionsToolStripMenuItem.Text = "Options";
@@ -103,14 +107,14 @@
             // headerViewToolStripMenuItem
             // 
             this.headerViewToolStripMenuItem.Name = "headerViewToolStripMenuItem";
-            this.headerViewToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.headerViewToolStripMenuItem.Size = new System.Drawing.Size(272, 34);
             this.headerViewToolStripMenuItem.Text = "Probe View";
             this.headerViewToolStripMenuItem.Click += new System.EventHandler(this.headerViewToolStripMenuItem_Click);
             // 
             // mirrorViewToolStripMenuItem
             // 
             this.mirrorViewToolStripMenuItem.Name = "mirrorViewToolStripMenuItem";
-            this.mirrorViewToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.mirrorViewToolStripMenuItem.Size = new System.Drawing.Size(272, 34);
             this.mirrorViewToolStripMenuItem.Text = "Mirror View";
             this.mirrorViewToolStripMenuItem.Click += new System.EventHandler(this.mirrorViewToolStripMenuItem_Click);
             // 
@@ -119,9 +123,16 @@
             this.celsiusToolStripMenuItem.Checked = true;
             this.celsiusToolStripMenuItem.CheckState = System.Windows.Forms.CheckState.Checked;
             this.celsiusToolStripMenuItem.Name = "celsiusToolStripMenuItem";
-            this.celsiusToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.celsiusToolStripMenuItem.Size = new System.Drawing.Size(272, 34);
             this.celsiusToolStripMenuItem.Text = "Celsius Only?";
             this.celsiusToolStripMenuItem.Click += new System.EventHandler(this.celsiusToolStripMenuItem_Click);
+            // 
+            // validationToolStripMenuItem
+            // 
+            this.validationToolStripMenuItem.Name = "validationToolStripMenuItem";
+            this.validationToolStripMenuItem.Size = new System.Drawing.Size(272, 34);
+            this.validationToolStripMenuItem.Text = "Validation";
+            this.validationToolStripMenuItem.Click += new System.EventHandler(this.validationToolStripMenuItem_Click);
             // 
             // listViewRotProbe
             // 
@@ -129,7 +140,7 @@
             this.listViewRotProbe.HideSelection = false;
             this.listViewRotProbe.Location = new System.Drawing.Point(51, 117);
             this.listViewRotProbe.Name = "listViewRotProbe";
-            this.listViewRotProbe.Size = new System.Drawing.Size(1817, 357);
+            this.listViewRotProbe.Size = new System.Drawing.Size(1817, 220);
             this.listViewRotProbe.TabIndex = 2;
             this.listViewRotProbe.UseCompatibleStateImageBehavior = false;
             this.listViewRotProbe.View = System.Windows.Forms.View.Details;
@@ -146,33 +157,53 @@
             // listViewMirror
             // 
             this.listViewMirror.HideSelection = false;
-            this.listViewMirror.Location = new System.Drawing.Point(63, 554);
+            this.listViewMirror.Location = new System.Drawing.Point(51, 378);
             this.listViewMirror.Name = "listViewMirror";
-            this.listViewMirror.Size = new System.Drawing.Size(1804, 187);
+            this.listViewMirror.Size = new System.Drawing.Size(1817, 187);
             this.listViewMirror.TabIndex = 4;
             this.listViewMirror.UseCompatibleStateImageBehavior = false;
             // 
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(63, 528);
+            this.label2.Location = new System.Drawing.Point(51, 355);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(104, 20);
             this.label2.TabIndex = 5;
             this.label2.Text = "Standard List";
             // 
-            // validationToolStripMenuItem
+            // hygrogenIPConfigToolStripMenuItem
             // 
-            this.validationToolStripMenuItem.Name = "validationToolStripMenuItem";
-            this.validationToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
-            this.validationToolStripMenuItem.Text = "Validation";
-            this.validationToolStripMenuItem.Click += new System.EventHandler(this.validationToolStripMenuItem_Click);
+            this.hygrogenIPConfigToolStripMenuItem.Name = "hygrogenIPConfigToolStripMenuItem";
+            this.hygrogenIPConfigToolStripMenuItem.Size = new System.Drawing.Size(272, 34);
+            this.hygrogenIPConfigToolStripMenuItem.Text = "Hygrogen IP Config";
+            this.hygrogenIPConfigToolStripMenuItem.Click += new System.EventHandler(this.hygrogenIPConfigToolStripMenuItem_Click);
+            // 
+            // listView1
+            // 
+            this.listView1.HideSelection = false;
+            this.listView1.Location = new System.Drawing.Point(51, 643);
+            this.listView1.Name = "listView1";
+            this.listView1.Size = new System.Drawing.Size(1817, 300);
+            this.listView1.TabIndex = 6;
+            this.listView1.UseCompatibleStateImageBehavior = false;
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(51, 620);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(106, 20);
+            this.label3.TabIndex = 7;
+            this.label3.Text = "Chamber Info";
             // 
             // Main
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1935, 837);
+            this.ClientSize = new System.Drawing.Size(1939, 1027);
+            this.Controls.Add(this.label3);
+            this.Controls.Add(this.listView1);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.listViewMirror);
             this.Controls.Add(this.label1);
@@ -204,6 +235,9 @@
         private System.Windows.Forms.ToolStripMenuItem temperatureAdjToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem celsiusToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem validationToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem hygrogenIPConfigToolStripMenuItem;
+        private System.Windows.Forms.ListView listView1;
+        private System.Windows.Forms.Label label3;
     }
 }
 

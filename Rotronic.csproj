@@ -68,6 +68,12 @@
     </Compile>
     <Compile Include="Commands.cs" />
     <Compile Include="HeaderOptions.cs" />
+    <Compile Include="IPConfigFrm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="IPConfigFrm.Designer.cs">
+      <DependentUpon>IPConfigFrm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Mirror.cs" />
     <Compile Include="MirrorDisplayOptions.cs" />
     <Compile Include="MirrorOptions.cs">
@@ -128,6 +134,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="CalibrationStepFrm.resx">
       <DependentUpon>CalibrationStepFrm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="IPConfigFrm.resx">
+      <DependentUpon>IPConfigFrm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="MirrorOptions.resx">
       <DependentUpon>MirrorOptions.cs</DependentUpon>

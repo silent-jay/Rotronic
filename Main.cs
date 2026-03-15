@@ -1083,5 +1083,11 @@ namespace Rotronic
                 try { Debug.WriteLine($"CopyListViewSelectionToClipboard: failed to set clipboard: {ex}"); } catch { }
             }
         }
+
+        private void hygrogenIPConfigToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var ipConfigFrm = new IPConfigFrm();
+            ipConfigFrm.ShowDialog();
+        }
     }
 }

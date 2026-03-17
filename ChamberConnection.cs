@@ -18,6 +18,10 @@ namespace Rotronic
         private TcpClient client;
         private NetworkStream stream;
 
+        // Buffer for TCP stream reassembly (TCP is not message-framed)
+        private readonly byte[] readBuf = new byte[4096];
+        private readonly StringBuilder recvBuffer = new StringBuilder(4096);
+
         public ChamberConnection(IPAddress address, int port, int connectTimeoutMs, int readTimeoutMs)
         {
             if (address == null) throw new ArgumentNullException(nameof(address));
@@ -66,6 +70,8 @@ namespace Rotronic
 
                     client = c;
                     stream = s;
+
+                    recvBuffer.Clear();
                     return true;
                 }
                 catch
@@ -109,6 +115,10 @@ namespace Rotronic
                 if (!EnsureConnected())
                     return null;
 
+                // If the device sent unsolicited/stale data earlier, keep it from polluting the next response.
+                // We only do a best-effort drain, bounded by the current ReadTimeout.
+                DrainAvailableNoThrow();
+
                 var payload = Encoding.ASCII.GetBytes(command);
                 try
                 {
@@ -123,7 +133,7 @@ namespace Rotronic
 
                 try
                 {
-                    return ReadLineNoThrow();
+                    return ReadResponseLineNoThrow();
                 }
                 catch
                 {
@@ -133,44 +143,103 @@ namespace Rotronic
             }
         }
 
-        private string ReadLineNoThrow()
+        private void DrainAvailableNoThrow()
         {
-            // TCP is a stream: responses may arrive in pieces. We read until CRLF (or LF),
-            // using the stream's ReadTimeout to bound how long we wait.
-            var bytes = new List<byte>(128);
-            bool gotAny = false;
+            try
+            {
+                if (stream == null)
+                    return;
+
+                // Read any immediately-available bytes (non-blocking via DataAvailable)
+                while (stream.DataAvailable)
+                {
+                    int n = stream.Read(readBuf, 0, readBuf.Length);
+                    if (n <= 0)
+                        break;
+
+                    recvBuffer.Append(Encoding.ASCII.GetString(readBuf, 0, n));
+
+                    // If buffer grows too large, drop it entirely (stale noise)
+                    if (recvBuffer.Length > 64 * 1024)
+                    {
+                        recvBuffer.Clear();
+                        break;
+                    }
+                }
+
+                // Also drop any complete lines already sitting in the buffer.
+                // Those are responses to earlier requests we don't care about anymore.
+                while (TryPopLineFromBuffer(out _)) { }
+            }
+            catch
+            {
+                // ignore drain failures
+            }
+        }
+
+        private string ReadResponseLineNoThrow()
+        {
+            // First, if a full line is already buffered, return it.
+            if (TryPopLineFromBuffer(out var line))
+                return line;
 
             while (true)
             {
-                int b;
+                int n;
                 try
                 {
-                    b = stream.ReadByte();
+                    n = stream.Read(readBuf, 0, readBuf.Length);
                 }
                 catch (IOException)
                 {
                     // timeout / socket error
-                    return gotAny ? Encoding.ASCII.GetString(bytes.ToArray()).Trim('\r', '\n', '\0', ' ') : null;
+                    return TryPopLineFromBuffer(out line) ? line : null;
                 }
 
-                if (b < 0)
-                    return gotAny ? Encoding.ASCII.GetString(bytes.ToArray()).Trim('\r', '\n', '\0', ' ') : null;
+                if (n <= 0)
+                    return TryPopLineFromBuffer(out line) ? line : null;
 
-                gotAny = true;
-                bytes.Add((byte)b);
+                recvBuffer.Append(Encoding.ASCII.GetString(readBuf, 0, n));
 
-                int count = bytes.Count;
-                if (count >= 2 && bytes[count - 2] == (byte)'\r' && bytes[count - 1] == (byte)'\n')
-                    break;
-                if (bytes[count - 1] == (byte)'\n')
-                    break;
+                if (TryPopLineFromBuffer(out line))
+                    return line;
 
-                // safety cap
-                if (bytes.Count >= 8192)
-                    break;
+                // safety cap: avoid unbounded growth if terminator never arrives
+                if (recvBuffer.Length >= 64 * 1024)
+                {
+                    var s = recvBuffer.ToString().Trim('\r', '\n', '\0', ' ');
+                    recvBuffer.Clear();
+                    return s.Length == 0 ? null : s;
+                }
             }
+        }
 
-            return Encoding.ASCII.GetString(bytes.ToArray()).Trim('\r', '\n', '\0', ' ');
+        private bool TryPopLineFromBuffer(out string line)
+        {
+            line = null;
+            if (recvBuffer.Length == 0)
+                return false;
+
+            var s = recvBuffer.ToString();
+
+            int lf = s.IndexOf('\n');
+            if (lf < 0)
+                return false;
+
+            int lineEnd = lf;
+            // Support CRLF: strip preceding CR
+            int len = lineEnd;
+            if (len > 0 && s[len - 1] == '\r')
+                len--;
+
+            line = s.Substring(0, len).Trim('\r', '\n', '\0', ' ');
+
+            // Remove consumed data (through LF)
+            recvBuffer.Clear();
+            if (lf + 1 < s.Length)
+                recvBuffer.Append(s.Substring(lf + 1));
+
+            return true;
         }
 
         public void CloseNoThrow()
@@ -181,6 +250,7 @@ namespace Rotronic
                 try { client?.Close(); } catch { }
                 stream = null;
                 client = null;
+                try { recvBuffer.Clear(); } catch { }
             }
         }
 

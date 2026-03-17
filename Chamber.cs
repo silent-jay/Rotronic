@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Rotronic
 {
-    internal class Chamber
+    public class Chamber
     {
         public string IPAddress { get; set; }
         public double Temperature { get; set; }

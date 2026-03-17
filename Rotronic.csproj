@@ -69,6 +69,12 @@
     <Compile Include="Chamber.cs" />
     <Compile Include="ChamberCommands.cs" />
     <Compile Include="ChamberConnection.cs" />
+    <Compile Include="ChamberControllerFrm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ChamberControllerFrm.Designer.cs">
+      <DependentUpon>ChamberControllerFrm.cs</DependentUpon>
+    </Compile>
     <Compile Include="ChamberDisplayOptions.cs" />
     <Compile Include="ChamberOptions.cs">
       <SubType>Form</SubType>
@@ -138,6 +144,9 @@
     </Compile>
     <EmbeddedResource Include="CalibrationSetupFrm.resx">
       <DependentUpon>CalibrationSetupFrm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ChamberControllerFrm.resx">
+      <DependentUpon>ChamberControllerFrm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="ChamberOptions.resx">
       <DependentUpon>ChamberOptions.cs</DependentUpon>

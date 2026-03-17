@@ -17,7 +17,6 @@ namespace Rotronic
 
         // suppression flags to avoid recursion when programmatically changing checks
         private bool _suspendItemCheckedHandler;
-        private bool _suspendSelectAllHandler;
 
         // Store steps passed from StepEditor
         private List<StepClass> _steps = new List<StepClass>();

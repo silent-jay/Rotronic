@@ -47,6 +47,9 @@ namespace Rotronic
         private int _chamberEditSubIndex = -1;
         private Rectangle _chamberEditBounds;
 
+        private readonly Dictionary<string, ChamberControllerFrm> _openChamberControllers =
+ new Dictionary<string, ChamberControllerFrm>(StringComparer.OrdinalIgnoreCase);
+
         public Main()
         {
             InitializeComponent();
@@ -117,6 +120,9 @@ namespace Rotronic
             listViewChamber.Scrollable = true;
             listViewChamber.KeyDown -= ListViewChamber_KeyDown;
             listViewChamber.KeyDown += ListViewChamber_KeyDown;
+
+            listViewChamber.DoubleClick -= ListViewChamber_DoubleClick;
+            listViewChamber.DoubleClick += ListViewChamber_DoubleClick;
         }
 
         private void UpdateChamberControlColumnIndexes()
@@ -402,6 +408,71 @@ namespace Rotronic
                 e.Handled = true;
                 EndChamberCellEdit(commit: false);
             }
+
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                OpenSelectedChamberController();
+                return;
+            }
+        }
+
+        private void ListViewChamber_DoubleClick(object sender, EventArgs e)
+        {
+            OpenSelectedChamberController();
+        }
+
+        private void OpenSelectedChamberController()
+        {
+            if (listViewChamber == null)
+                return;
+
+            // Don't open when inline-editing a setpoint cell.
+            if (_chamberEditBox != null)
+                return;
+
+            if (listViewChamber.SelectedItems == null || listViewChamber.SelectedItems.Count ==0)
+                return;
+
+            var item = listViewChamber.SelectedItems[0];
+            var chamber = item?.Tag as Chamber;
+            if (chamber == null)
+                return;
+
+            var key = chamber.IPAddress ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(key))
+                key = chamber.Name ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(key)
+                && _openChamberControllers.TryGetValue(key, out var existing)
+                && existing != null
+                && !existing.IsDisposed)
+            {
+                try
+                {
+                    if (existing.WindowState == FormWindowState.Minimized)
+                        existing.WindowState = FormWindowState.Normal;
+                    existing.Activate();
+                    existing.BringToFront();
+                }
+                catch { }
+                return;
+            }
+
+            var controller = new ChamberControllerFrm(chamber);
+
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                _openChamberControllers[key] = controller;
+                controller.FormClosed += (s, e) =>
+                {
+                    try { _openChamberControllers.Remove(key); } catch { }
+                };
+            }
+
+            controller.Show(this);
+            controller.BringToFront();
         }
 
         private void RefreshTimer_Tick(object sender, EventArgs e)
@@ -1400,9 +1471,11 @@ namespace Rotronic
                 {
                     // probe removed -> remove item
                     // Keep fake probes used for UX/UI testing even if they don't appear in the latest snapshot.
-                    if (underlying != null && string.Equals(underlying.DeviceModel ?? string.Empty, "Fake", StringComparison.OrdinalIgnoreCase))
+                    // If the fake probe is not visible, it will be re-added in the next full refresh.
+                    var existing = item.Tag as RotProbe;
+                    if (existing != null && string.Equals(existing.DeviceModel ?? string.Empty, "Fake", StringComparison.OrdinalIgnoreCase))
                     {
-                        item.ForeColor = underlying.InUse ? Color.Red : SystemColors.WindowText;
+                        item.ForeColor = existing.InUse ? Color.Red : SystemColors.WindowText;
                     }
                     else
                     {

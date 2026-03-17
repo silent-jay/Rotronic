@@ -47,6 +47,8 @@ namespace Rotronic
         public string ID { get; set; }
         public string IDN { get; set; }
         public bool Stable { get; set; }
+        public bool InUse { get; set; }
+        public bool Selected { get; set; }
 
         // Formatted read-only properties (set numeric value, read formatted string)
         public string DewPointFormatted => FormatWithUnit(DewPoint, "°C", 2);

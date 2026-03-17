@@ -154,6 +154,9 @@ namespace Rotronic
                     else
                         lvi.Checked = false;
 
+                    if (srcItem.Tag is RotProbe rp)
+                        lvi.ForeColor = rp.InUse ? Color.Red : SystemColors.WindowText;
+
                     listViewRotProbe.Items.Add(lvi);
                 }
 
@@ -229,6 +232,9 @@ namespace Rotronic
                         lvi.Checked = wasChecked;
                     else
                         lvi.Checked = false;
+
+                    if (srcItem.Tag is Mirror m)
+                        lvi.ForeColor = m.InUse ? Color.Red : SystemColors.WindowText;
 
                     listViewMirror.Items.Add(lvi);
                 }

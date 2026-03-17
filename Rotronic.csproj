@@ -66,6 +66,16 @@
     <Compile Include="CalibrationStepFrm.Designer.cs">
       <DependentUpon>CalibrationStepFrm.cs</DependentUpon>
     </Compile>
+    <Compile Include="Chamber.cs" />
+    <Compile Include="ChamberCommands.cs" />
+    <Compile Include="ChamberConnection.cs" />
+    <Compile Include="ChamberDisplayOptions.cs" />
+    <Compile Include="ChamberOptions.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ChamberOptions.Designer.cs">
+      <DependentUpon>ChamberOptions.cs</DependentUpon>
+    </Compile>
     <Compile Include="Commands.cs" />
     <Compile Include="HeaderOptions.cs" />
     <Compile Include="IPConfigFrm.cs">
@@ -98,6 +108,9 @@
     <Compile Include="Notes\ToDo.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SafeShutdownDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Step.cs" />
     <Compile Include="StepEditor.cs">
       <SubType>Form</SubType>
@@ -135,6 +148,9 @@
     <EmbeddedResource Include="CalibrationStepFrm.resx">
       <DependentUpon>CalibrationStepFrm.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="ChamberOptions.resx">
+      <DependentUpon>ChamberOptions.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="IPConfigFrm.resx">
       <DependentUpon>IPConfigFrm.cs</DependentUpon>
     </EmbeddedResource>
@@ -156,6 +172,9 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <EmbeddedResource Include="SafeShutdownDialog.resx">
+      <DependentUpon>SafeShutdownDialog.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="StepEditor.resx">
       <DependentUpon>StepEditor.cs</DependentUpon>
     </EmbeddedResource>

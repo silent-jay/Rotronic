@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using System.Diagnostics;
 
 namespace Rotronic
 {
@@ -11,13 +12,7 @@ namespace Rotronic
     {
         private Main _main;
 
-        // Persist checked state between refreshes using a stable row key (concatenate main columns)
-        private readonly Dictionary<string, bool> _probeCheckedStates = new Dictionary<string, bool>();
-        private readonly Dictionary<string, bool> _mirrorCheckedStates = new Dictionary<string, bool>();
-
-        // Fallback maps by ComPort (most stable single identifier)
-        private readonly Dictionary<string, bool> _probeCheckedByComPort = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, bool> _mirrorCheckedByComPort = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        // Checkbox state is persisted on the underlying device objects via their `Selected` property.
 
         // suppression flags to avoid recursion when programmatically changing checks
         private bool _suspendItemCheckedHandler;
@@ -54,6 +49,7 @@ namespace Rotronic
             {
                 _main.ProbesRefreshed += Main_ProbesRefreshed;
                 _main.MirrorsRefreshed += Main_MirrorsRefreshed;
+                _main.ChambersRefreshed += Main_ChambersRefreshed;
 
                 // wire events to keep header checkbox positioned and to track user item checks
                 listViewRotProbe.ColumnWidthChanged += ListViewRotProbe_ColumnWidthChanged;
@@ -61,9 +57,22 @@ namespace Rotronic
                 listViewMirror.ColumnWidthChanged += ListViewMirror_ColumnWidthChanged;
                 listViewMirror.ItemChecked += ListViewMirror_ItemChecked;
 
+                if (listViewChamber != null)
+                {
+                    try
+                    {
+                        // Main's chamber list is OwnerDraw with custom rendering.
+                        // In Setup we want standard rendering so ForeColor (InUse) works.
+                        listViewChamber.OwnerDraw = false;
+                    }
+                    catch { }
+                    listViewChamber.ItemChecked += ListViewChamber_ItemChecked;
+                }
+
                 // initial copy to mirror current state
                 CopyProbesFromMain(_main);
                 CopyMirrorsFromMain(_main);
+                CopyChambersFromMain(_main);
 
                 // Make sure select-all checkboxes are placed correctly
                 PositionSelectAllCheckboxes();
@@ -76,6 +85,7 @@ namespace Rotronic
             {
                 _main.ProbesRefreshed -= Main_ProbesRefreshed;
                 _main.MirrorsRefreshed -= Main_MirrorsRefreshed;
+                _main.ChambersRefreshed -= Main_ChambersRefreshed;
                 _main = null;
             }
         }
@@ -93,6 +103,216 @@ namespace Rotronic
         private void Main_MirrorsRefreshed(object sender, EventArgs e)
         {
             CopyMirrorsFromMain(sender as Main);
+        }
+
+        private void Main_ChambersRefreshed(object sender, EventArgs e)
+        {
+            CopyChambersFromMain(sender as Main);
+        }
+
+        private static string GetChamberIpFromSetupItem(ListViewItem item)
+        {
+            if (item == null) return string.Empty;
+            try
+            {
+                if (item.Tag is Chamber c && !string.IsNullOrWhiteSpace(c.IPAddress))
+                    return c.IPAddress;
+            }
+            catch { }
+
+            return string.Empty;
+        }
+
+        private static string GetChamberIpFromMainItem(ListView sourceListView, ListViewItem item)
+        {
+            if (sourceListView == null || item == null) return string.Empty;
+            try
+            {
+                if (item.Tag is Chamber c && !string.IsNullOrWhiteSpace(c.IPAddress))
+                    return c.IPAddress;
+            }
+            catch { }
+
+            // Fallback: find by column name
+            for (int ci = 0; ci < sourceListView.Columns.Count; ci++)
+            {
+                if (string.Equals(sourceListView.Columns[ci].Name, "IPAddress", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (ci >= 0 && ci < item.SubItems.Count)
+                        return item.SubItems[ci].Text ?? string.Empty;
+                    break;
+                }
+            }
+            return string.Empty;
+        }
+
+        private void CopyChambersFromMain(Main main)
+        {
+            if (main == null || main.listViewChamber == null || listViewChamber == null)
+                return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)(() => CopyChambersFromMain(main)));
+                return;
+            }
+
+            listViewChamber.BeginUpdate();
+            try
+            {
+                // Persist UI checked state into underlying objects
+                foreach (ListViewItem existing in listViewChamber.Items)
+                {
+                    if (existing.Tag is Chamber c)
+                        c.Selected = existing.Checked;
+                }
+
+                // Diagnostics: check for empty/duplicate IPs in Main
+                try
+                {
+                    var ips = new List<string>();
+                    foreach (ListViewItem src in main.listViewChamber.Items)
+                    {
+                        var ip = GetChamberIpFromMainItem(main.listViewChamber, src);
+                        ips.Add(ip ?? string.Empty);
+                    }
+                    var emptyCount = ips.Count(s => string.IsNullOrWhiteSpace(s));
+                    var dupCount = ips.Where(s => !string.IsNullOrWhiteSpace(s))
+                                      .GroupBy(s => s, StringComparer.OrdinalIgnoreCase)
+                                      .Count(g => g.Count() > 1);
+                    var sample = string.Join(",", ips.Where(s => !string.IsNullOrWhiteSpace(s)).Take(5));
+                    Debug.WriteLine($"[CalibrationSetupFrm] Chamber refresh: total={ips.Count}, empty IPs={emptyCount}, duplicate IP groups={dupCount}, sample=[{sample}]");
+                }
+                catch { }
+
+                bool columnsMatch = listViewChamber.Columns.Count == main.listViewChamber.Columns.Count + 1;
+                if (columnsMatch)
+                {
+                    for (int i = 0; i < main.listViewChamber.Columns.Count; i++)
+                    {
+                        var mainCol = main.listViewChamber.Columns[i];
+                        var thisCol = listViewChamber.Columns[i + 1];
+                        if (!string.Equals(mainCol.Name, thisCol.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            columnsMatch = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (columnsMatch)
+                {
+                    var existingMap = new Dictionary<string, ListViewItem>(StringComparer.OrdinalIgnoreCase);
+                    foreach (ListViewItem it in listViewChamber.Items)
+                    {
+                        string ip = GetSubItemTextByColumnName(listViewChamber, it, "IPAddress", hasTestColumn: true);
+                        if (string.IsNullOrWhiteSpace(ip))
+                            ip = GetChamberIpFromSetupItem(it);
+                        if (!string.IsNullOrWhiteSpace(ip) && !existingMap.ContainsKey(ip))
+                            existingMap[ip] = it;
+                    }
+
+                    var processed = new HashSet<ListViewItem>();
+                    foreach (ListViewItem srcItem in main.listViewChamber.Items)
+                    {
+                        var chamber = srcItem.Tag as Chamber;
+                        string ipKey = GetChamberIpFromMainItem(main.listViewChamber, srcItem);
+
+                        if (!string.IsNullOrWhiteSpace(ipKey) && existingMap.TryGetValue(ipKey, out var target))
+                        {
+                            for (int si = 0; si < srcItem.SubItems.Count; si++)
+                            {
+                                int destIndex = si + 1;
+                                string txt = srcItem.SubItems[si].Text ?? string.Empty;
+                                if (destIndex < target.SubItems.Count)
+                                    target.SubItems[destIndex].Text = txt;
+                                else
+                                    target.SubItems.Add(txt);
+                            }
+
+                            target.Tag = chamber ?? srcItem.Tag;
+                            if (target.Tag is Chamber tc)
+                            {
+                                target.ForeColor = tc.InUse ? Color.Red : SystemColors.WindowText;
+                                target.Checked = tc.Selected;
+                            }
+
+                            processed.Add(target);
+                        }
+                        else
+                        {
+                            var lvi = new ListViewItem(string.Empty) { Checked = false };
+                            foreach (ListViewItem.ListViewSubItem sub in srcItem.SubItems)
+                                lvi.SubItems.Add(sub.Text);
+
+                            lvi.Tag = chamber ?? srcItem.Tag;
+                            if (lvi.Tag is Chamber nc)
+                            {
+                                lvi.ForeColor = nc.InUse ? Color.Red : SystemColors.WindowText;
+                                lvi.Checked = nc.Selected;
+                            }
+                            listViewChamber.Items.Add(lvi);
+                            processed.Add(lvi);
+                        }
+                    }
+
+                    var toRemove = listViewChamber.Items.Cast<ListViewItem>().Where(it => !processed.Contains(it)).ToList();
+                    foreach (var it in toRemove)
+                        listViewChamber.Items.Remove(it);
+
+                    return;
+                }
+
+                // Full rebuild
+                listViewChamber.Items.Clear();
+                listViewChamber.Columns.Clear();
+
+                var testCol = new ColumnHeader { Name = "Test", Text = "Test", Width = 60, TextAlign = HorizontalAlignment.Left };
+                listViewChamber.Columns.Add(testCol);
+
+                foreach (ColumnHeader srcCol in main.listViewChamber.Columns)
+                {
+                    var col = new ColumnHeader
+                    {
+                        Name = srcCol.Name,
+                        Text = srcCol.Text,
+                        Width = srcCol.Width,
+                        TextAlign = srcCol.TextAlign
+                    };
+                    listViewChamber.Columns.Add(col);
+                }
+
+                listViewChamber.View = View.Details;
+                listViewChamber.FullRowSelect = true;
+                listViewChamber.CheckBoxes = true;
+
+                foreach (ListViewItem srcItem in main.listViewChamber.Items)
+                {
+                    var lvi = new ListViewItem(string.Empty) { Checked = false };
+                    foreach (ListViewItem.ListViewSubItem sub in srcItem.SubItems)
+                        lvi.SubItems.Add(sub.Text);
+
+                    lvi.Tag = srcItem.Tag;
+                    if (lvi.Tag is Chamber c)
+                    {
+                        lvi.ForeColor = c.InUse ? Color.Red : SystemColors.WindowText;
+                        lvi.Checked = c.Selected;
+                    }
+                    listViewChamber.Items.Add(lvi);
+                }
+            }
+            finally
+            {
+                listViewChamber.EndUpdate();
+            }
+        }
+
+        private void ListViewChamber_ItemChecked(object sender, ItemCheckedEventArgs e)
+        {
+            if (_suspendItemCheckedHandler) return;
+
+            if (e.Item.Tag is Chamber c)
+                c.Selected = e.Item.Checked;
         }
 
         // Build a stable key from a few stable column names (ComPort, SerialNumber, DeviceName, ProbeAddress, ProbeType)
@@ -192,18 +412,30 @@ namespace Rotronic
             listViewRotProbe.BeginUpdate();
             try
             {
-                // Capture current checked states before touching the list
-                _probeCheckedStates.Clear();
-                _probeCheckedByComPort.Clear();
+                // Diagnostics: check for empty/duplicate ComPorts in Main
+                try
+                {
+                    var coms = new List<string>();
+                    foreach (ListViewItem src in main.listViewRotProbe.Items)
+                    {
+                        var rp = src.Tag as RotProbe;
+                        var com = rp?.ComPort ?? GetSubItemTextByColumnName(main.listViewRotProbe, src, "ComPort", hasTestColumn: false);
+                        coms.Add(com ?? string.Empty);
+                    }
+                    var emptyCount = coms.Count(s => string.IsNullOrWhiteSpace(s));
+                    var dupCount = coms.Where(s => !string.IsNullOrWhiteSpace(s))
+                                       .GroupBy(s => s, StringComparer.OrdinalIgnoreCase)
+                                       .Count(g => g.Count() > 1);
+                    var sample = string.Join(",", coms.Where(s => !string.IsNullOrWhiteSpace(s)).Take(5));
+                    Debug.WriteLine($"[CalibrationSetupFrm] Probe refresh: total={coms.Count}, empty ComPorts={emptyCount}, duplicate ComPort groups={dupCount}, sample=[{sample}]");
+                }
+                catch { }
+
+                // Persist current UI checked state into the underlying objects before refreshing.
                 foreach (ListViewItem existing in listViewRotProbe.Items)
                 {
-                    string key = BuildRowKeyFromSubItems(listViewRotProbe, existing, hasTestColumn: true);
-                    _probeCheckedStates[key] = existing.Checked;
-
-                    // also try to capture ComPort if present in this setup list
-                    string com = GetSubItemTextByColumnName(listViewRotProbe, existing, "ComPort", hasTestColumn: true);
-                    if (!string.IsNullOrEmpty(com) && !_probeCheckedByComPort.ContainsKey(com))
-                        _probeCheckedByComPort[com] = existing.Checked;
+                    if (existing.Tag is RotProbe rp)
+                        rp.Selected = existing.Checked;
                 }
 
                 // If columns already match (Test + main columns) and simple update is possible, do in-place update
@@ -264,6 +496,11 @@ namespace Rotronic
 
                             // update tag
                             target.Tag = rp ?? srcItem.Tag;
+                            if (target.Tag is RotProbe trp)
+                            {
+                                target.ForeColor = trp.InUse ? Color.Red : SystemColors.WindowText;
+                                target.Checked = trp.Selected;
+                            }
                             processed.Add(target);
                         }
                         else
@@ -273,22 +510,14 @@ namespace Rotronic
                             foreach (ListViewItem.ListViewSubItem sub in srcItem.SubItems)
                                 lvi.SubItems.Add(sub.Text);
 
-                            // Restore checked by previous maps
-                            bool restored = false;
-                            string mainKey = BuildRowKeyFromSubItems(main.listViewRotProbe, srcItem, hasTestColumn: false);
-                            if (_probeCheckedStates.TryGetValue(mainKey, out bool wasChecked))
-                            {
-                                lvi.Checked = wasChecked;
-                                restored = true;
-                            }
-                            else if (!string.IsNullOrEmpty(comKey) && _probeCheckedByComPort.TryGetValue(comKey, out bool byCom))
-                            {
-                                lvi.Checked = byCom;
-                                restored = true;
-                            }
-
                             lvi.Tag = rp ?? srcItem.Tag;
+                            if (lvi.Tag is RotProbe lrp)
+                            {
+                                lvi.ForeColor = lrp.InUse ? Color.Red : SystemColors.WindowText;
+                                lvi.Checked = lrp.Selected;
+                            }
                             listViewRotProbe.Items.Add(lvi);
+                            processed.Add(lvi);
                         }
                     }
 
@@ -300,7 +529,6 @@ namespace Rotronic
                         listViewRotProbe.Items.Remove(it);
                     }
 
-                    // After populating, update the select-all checkbox state
                     UpdateSelectAllCheckboxState(chkSelectAllProbes, listViewRotProbe);
 
                     return;
@@ -343,50 +571,15 @@ namespace Rotronic
                         lvi.SubItems.Add(sub.Text);
                     }
 
-                    // Compute key using main's columns (no Test column in main)
-                    string mainKey = BuildRowKeyFromSubItems(main.listViewRotProbe, srcItem, hasTestColumn: false);
-
-                    // Prefer Tag-based identification: underlying RotProbe.ComPort when available
-                    bool restored = false;
-                    try
-                    {
-                        if (srcItem.Tag is RotProbe rp && !string.IsNullOrEmpty(rp.ComPort))
-                        {
-                            if (_probeCheckedByComPort.TryGetValue(rp.ComPort, out bool byCom))
-                            {
-                                lvi.Checked = byCom;
-                                restored = true;
-                            }
-                        }
-                    }
-                    catch { }
-
-                    // Try to restore previous checked state by mainKey first (if not restored by com)
-                    if (!restored && _probeCheckedStates.TryGetValue(mainKey, out bool wasChecked))
-                    {
-                        lvi.Checked = wasChecked;
-                        restored = true;
-                    }
-
-                    // fallback by ComPort read from main item if still not restored
-                    if (!restored)
-                    {
-                        string com = GetSubItemTextByColumnName(main.listViewRotProbe, srcItem, "ComPort", hasTestColumn: false);
-                        if (!string.IsNullOrEmpty(com) && _probeCheckedByComPort.TryGetValue(com, out bool byCom2))
-                        {
-                            lvi.Checked = byCom2;
-                            restored = true;
-                        }
-                    }
-
-                    if (!restored)
-                        lvi.Checked = false;
-
                     lvi.Tag = srcItem.Tag;
+                    if (lvi.Tag is RotProbe rp2)
+                    {
+                        lvi.ForeColor = rp2.InUse ? Color.Red : SystemColors.WindowText;
+                        lvi.Checked = rp2.Selected;
+                    }
                     listViewRotProbe.Items.Add(lvi);
                 }
 
-                // After populating, update the select-all checkbox state
                 UpdateSelectAllCheckboxState(chkSelectAllProbes, listViewRotProbe);
             }
             finally
@@ -411,17 +604,11 @@ namespace Rotronic
             listViewMirror.BeginUpdate();
             try
             {
-                // Capture current checked states before touching the list
-                _mirrorCheckedStates.Clear();
-                _mirrorCheckedByComPort.Clear();
+                // Persist UI checked state into underlying mirrors
                 foreach (ListViewItem existing in listViewMirror.Items)
                 {
-                    string key = BuildRowKeyFromSubItems(listViewMirror, existing, hasTestColumn: true);
-                    _mirrorCheckedStates[key] = existing.Checked;
-
-                    string com = GetSubItemTextByColumnName(listViewMirror, existing, "ComPort", hasTestColumn: true);
-                    if (!string.IsNullOrEmpty(com) && !_mirrorCheckedByComPort.ContainsKey(com))
-                        _mirrorCheckedByComPort[com] = existing.Checked;
+                    if (existing.Tag is Mirror m)
+                        m.Selected = existing.Checked;
                 }
 
                 // If columns already match (Test + main columns) and simple update is possible, do in-place update
@@ -478,6 +665,11 @@ namespace Rotronic
                             }
 
                             target.Tag = m ?? srcItem.Tag;
+                            if (target.Tag is Mirror tm)
+                            {
+                                target.ForeColor = tm.InUse ? Color.Red : SystemColors.WindowText;
+                                target.Checked = tm.Selected;
+                            }
                             processed.Add(target);
                         }
                         else
@@ -485,22 +677,14 @@ namespace Rotronic
                             var lvi = new ListViewItem(string.Empty) { Checked = false };
                             foreach (ListViewItem.ListViewSubItem sub in srcItem.SubItems)
                                 lvi.SubItems.Add(sub.Text);
-
-                            bool restored = false;
-                            string mainKey = BuildRowKeyFromSubItems(main.listViewMirror, srcItem, hasTestColumn: false);
-                            if (_mirrorCheckedStates.TryGetValue(mainKey, out bool wasChecked))
-                            {
-                                lvi.Checked = wasChecked;
-                                restored = true;
-                            }
-                            else if (!string.IsNullOrEmpty(comKey) && _mirrorCheckedByComPort.TryGetValue(comKey, out bool byCom))
-                            {
-                                lvi.Checked = byCom;
-                                restored = true;
-                            }
-
                             lvi.Tag = srcItem.Tag;
+                            if (lvi.Tag is Mirror lm)
+                            {
+                                lvi.ForeColor = lm.InUse ? Color.Red : SystemColors.WindowText;
+                                lvi.Checked = lm.Selected;
+                            }
                             listViewMirror.Items.Add(lvi);
+                            processed.Add(lvi);
                         }
                     }
 
@@ -543,42 +727,12 @@ namespace Rotronic
                         lvi.SubItems.Add(sub.Text);
                     }
 
-                    string mainKey = BuildRowKeyFromSubItems(main.listViewMirror, srcItem, hasTestColumn: false);
-
-                    bool restored = false;
-                    try
-                    {
-                        if (srcItem.Tag is Mirror m && !string.IsNullOrEmpty(m.ComPort))
-                        {
-                            if (_mirrorCheckedByComPort.TryGetValue(m.ComPort, out bool byCom))
-                            {
-                                lvi.Checked = byCom;
-                                restored = true;
-                            }
-                        }
-                    }
-                    catch { }
-
-                    if (!restored && _mirrorCheckedStates.TryGetValue(mainKey, out bool wasChecked))
-                    {
-                        lvi.Checked = wasChecked;
-                        restored = true;
-                    }
-
-                    if (!restored)
-                    {
-                        string com = GetSubItemTextByColumnName(main.listViewMirror, srcItem, "ComPort", hasTestColumn: false);
-                        if (!string.IsNullOrEmpty(com) && _mirrorCheckedByComPort.TryGetValue(com, out bool byCom2))
-                        {
-                            lvi.Checked = byCom2;
-                            restored = true;
-                        }
-                    }
-
-                    if (!restored)
-                        lvi.Checked = false;
-
                     lvi.Tag = srcItem.Tag;
+                    if (lvi.Tag is Mirror m2)
+                    {
+                        lvi.ForeColor = m2.InUse ? Color.Red : SystemColors.WindowText;
+                        lvi.Checked = m2.Selected;
+                    }
                     listViewMirror.Items.Add(lvi);
                 }
 
@@ -596,13 +750,8 @@ namespace Rotronic
         {
             if (_suspendItemCheckedHandler) return;
 
-            string key = BuildRowKeyFromSubItems(listViewRotProbe, e.Item, hasTestColumn: true);
-            _probeCheckedStates[key] = e.Item.Checked;
-
-            // also capture ComPort if available
-            string com = GetSubItemTextByColumnName(listViewRotProbe, e.Item, "ComPort", hasTestColumn: true);
-            if (!string.IsNullOrEmpty(com))
-                _probeCheckedByComPort[com] = e.Item.Checked;
+            if (e.Item.Tag is RotProbe rp)
+                rp.Selected = e.Item.Checked;
 
             UpdateSelectAllCheckboxState(chkSelectAllProbes, listViewRotProbe);
         }
@@ -612,12 +761,26 @@ namespace Rotronic
         {
             if (_suspendItemCheckedHandler) return;
 
-            string key = BuildRowKeyFromSubItems(listViewMirror, e.Item, hasTestColumn: true);
-            _mirrorCheckedStates[key] = e.Item.Checked;
+            // Enforce single-selection for mirrors
+            if (e.Item.Checked)
+            {
+                _suspendItemCheckedHandler = true;
+                try
+                {
+                    foreach (ListViewItem item in listViewMirror.Items)
+                    {
+                        if (!ReferenceEquals(item, e.Item) && item.Checked)
+                            item.Checked = false;
+                    }
+                }
+                finally
+                {
+                    _suspendItemCheckedHandler = false;
+                }
+            }
 
-            string com = GetSubItemTextByColumnName(listViewMirror, e.Item, "ComPort", hasTestColumn: true);
-            if (!string.IsNullOrEmpty(com))
-                _mirrorCheckedByComPort[com] = e.Item.Checked;
+            if (e.Item.Tag is Mirror m)
+                m.Selected = e.Item.Checked;
 
             UpdateSelectAllCheckboxState(chkSelectAllMirrors, listViewMirror);
         }
@@ -634,12 +797,8 @@ namespace Rotronic
                 foreach (ListViewItem item in listViewRotProbe.Items)
                 {
                     item.Checked = check;
-                    string key = BuildRowKeyFromSubItems(listViewRotProbe, item, hasTestColumn: true);
-                    _probeCheckedStates[key] = check;
-
-                    string com = GetSubItemTextByColumnName(listViewRotProbe, item, "ComPort", hasTestColumn: true);
-                    if (!string.IsNullOrEmpty(com))
-                        _probeCheckedByComPort[com] = check;
+                    if (item.Tag is RotProbe rp)
+                        rp.Selected = check;
                 }
             }
             finally
@@ -659,13 +818,19 @@ namespace Rotronic
             {
                 foreach (ListViewItem item in listViewMirror.Items)
                 {
-                    item.Checked = check;
-                    string key = BuildRowKeyFromSubItems(listViewMirror, item, hasTestColumn: true);
-                    _mirrorCheckedStates[key] = check;
-
-                    string com = GetSubItemTextByColumnName(listViewMirror, item, "ComPort", hasTestColumn: true);
-                    if (!string.IsNullOrEmpty(com))
-                        _mirrorCheckedByComPort[com] = check;
+                    // mirrors are single-select; select-all only supports clearing
+                    if (check)
+                    {
+                        item.Checked = false;
+                        if (item.Tag is Mirror mSet)
+                            mSet.Selected = false;
+                    }
+                    else
+                    {
+                        item.Checked = false;
+                        if (item.Tag is Mirror mClear)
+                            mClear.Selected = false;
+                    }
                 }
             }
             finally
@@ -820,6 +985,22 @@ namespace Rotronic
                 }
             }
 
+            // Collect selected chamber (exactly one required)
+            ListViewItem selectedChamber = null;
+            int chamberCount = 0;
+            if (listViewChamber != null)
+            {
+                foreach (ListViewItem item in listViewChamber.Items)
+                {
+                    if (item.Checked)
+                    {
+                        chamberCount++;
+                        if (chamberCount == 1)
+                            selectedChamber = item;
+                    }
+                }
+            }
+
             // Validate selections
             if (selectedProbes.Count ==0)
             {
@@ -836,7 +1017,90 @@ namespace Rotronic
                 MessageBox.Show("Please select only one mirror for calibration.", "Multiple Mirrors Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            if (listViewChamber != null)
+            {
+                if (chamberCount == 0)
+                {
+                    MessageBox.Show("Please select one chamber for calibration.", "No Chamber Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (chamberCount > 1)
+                {
+                    MessageBox.Show("Please select only one chamber for calibration.", "Multiple Chambers Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            // Block starting a calibration with items already in use
+            var inUseProbes = selectedProbes
+                .Select(i => i?.Tag as RotProbe)
+                .Where(p => p != null && p.InUse)
+                .ToList();
+            if (inUseProbes.Count > 0)
+            {
+                var probeNames = string.Join(", ", inUseProbes.Select(p => !string.IsNullOrWhiteSpace(p.DeviceName) ? p.DeviceName :
+                                                                            !string.IsNullOrWhiteSpace(p.SerialNumber) ? p.SerialNumber :
+                                                                            !string.IsNullOrWhiteSpace(p.ComPort) ? p.ComPort :
+                                                                            p.ProbeType));
+                MessageBox.Show($"One or more selected probes are already in use: {probeNames}", "Probe Unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var chamberObj = selectedChamber?.Tag as Chamber;
+            if (chamberObj != null && chamberObj.InUse)
+            {
+                var chamberName = !string.IsNullOrWhiteSpace(chamberObj.IPAddress) ? chamberObj.IPAddress :
+                                  !string.IsNullOrWhiteSpace(chamberObj.Name) ? chamberObj.Name :
+                                  selectedChamber?.Text;
+                MessageBox.Show($"The selected chamber is already in use: {chamberName}", "Chamber Unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var mirrorObj = selectedMirror?.Tag as Mirror;
+            if (mirrorObj != null && mirrorObj.InUse)
+            {
+                var mirrorName = !string.IsNullOrWhiteSpace(mirrorObj.SerialNumber) ? mirrorObj.SerialNumber :
+                                 !string.IsNullOrWhiteSpace(mirrorObj.ComPort) ? mirrorObj.ComPort :
+                                 !string.IsNullOrWhiteSpace(mirrorObj.ID) ? mirrorObj.ID :
+                                 selectedMirror?.Text;
+                MessageBox.Show($"The selected mirror is already in use: {mirrorName}", "Mirror Unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Mark selected items as in-use until the calibration form closes
+            foreach (var item in selectedProbes)
+            {
+                if (item?.Tag is RotProbe p)
+                    p.InUse = true;
+            }
+            if (mirrorObj != null)
+                mirrorObj.InUse = true;
+
+            if (chamberObj != null)
+                chamberObj.InUse = true;
+
             var calibrationProcess = new CalProgressFrm(selectedProbes, selectedMirror, _steps, checkBoxManual.Checked);
+            calibrationProcess.FormClosed += (s, args) =>
+            {
+                foreach (var item in selectedProbes)
+                {
+                    if (item?.Tag is RotProbe p)
+                        p.InUse = false;
+                }
+                if (mirrorObj != null)
+                    mirrorObj.InUse = false;
+
+                if (chamberObj != null)
+                    chamberObj.InUse = false;
+
+                try
+                {
+                    if (listViewChamber != null)
+                        CopyChambersFromMain(_main);
+                }
+                catch { }
+            };
             calibrationProcess.Show();
         }
     }

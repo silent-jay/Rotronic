@@ -19,6 +19,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Net;
+using System.Net.Sockets;
 
 namespace Rotronic
 {
@@ -36,6 +38,22 @@ namespace Rotronic
         private static readonly object mirrorsLock = new object();
         public static List<Mirror> ConnectedMirrors { get; private set; } = new List<Mirror>();
 
+        // Chambers
+        private static readonly object chambersLock = new object();
+        public static List<Chamber> ConnectedChambers { get; private set; } = new List<Chamber>();
+
+        private static System.Threading.Timer chamberTimer;
+        private static readonly object chamberTimerLock = new object();
+        private static bool chamberMonitoringStarted = false;
+        private const int ChamberUpdateIntervalMs = 15000;
+        private const int ChamberConnectTimeoutMs = 1500;
+        private const int ChamberReadTimeoutMs = 2000;
+        private static readonly HashSet<string> chamberStaticInitialized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private static volatile bool safeShutdownInProgress = false;
+        private static volatile bool skipSafeShutdown = false;
+        private static volatile bool forceCloseNowRequested = false;
+
         // New: timer to periodically refresh data
         private static System.Threading.Timer probeTimer;
         private static readonly object timerLock = new object();
@@ -48,31 +66,550 @@ namespace Rotronic
         [STAThread]
         static void Main()
         {
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            ReconnectSavedChambersOnStartup();
 
             // Ensure we will close the ports when the app exits and turn off mirror control
             Application.ApplicationExit += (s, e) =>
             {
+                if (!skipSafeShutdown)
+                    skipSafeShutdown = true;
                 StopProbeMonitoring();
+                StopChamberMonitoring();
                 // attempt to set mirrors control off
                 try { SetAllMirrorControl(false); } catch { }
                 CloseActivePorts();
+                try { ChamberCommands.CloseAll(); } catch { }
             };
             AppDomain.CurrentDomain.ProcessExit += (s, e) =>
             {
                 StopProbeMonitoring();
+                StopChamberMonitoring();
                 try { SetAllMirrorControl(false); } catch { }
                 CloseActivePorts();
+                try { ChamberCommands.CloseAll(); } catch { }
             };
             // Start discovery + periodic updates
             StartProbeMonitoring(2000); // 15 seconds
+            StartChamberMonitoring();
             // Create the form instance (calls InitializeComponent)
             var mainForm = new Main();
+            mainForm.FormClosing += MainForm_FormClosing;
             Application.Run(mainForm);
         }
 
+        private static void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (skipSafeShutdown)
+                return;
 
+            if (safeShutdownInProgress)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            var snapshot = GetConnectedChambersSnapshot();
+            var realChambers = snapshot
+                .Where(c => c != null && !string.IsNullOrWhiteSpace(c.IPAddress) && !IsFakeChamber(c))
+                .ToList();
+
+            if (realChambers.Count == 0)
+                return;
+
+            DialogResult result;
+            try
+            {
+                result = MessageBox.Show(
+                    "Would you like to perform a safe shutdown?",
+                    "Safe Shutdown",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (result != DialogResult.Yes)
+                return;
+
+            e.Cancel = true;
+            safeShutdownInProgress = true;
+
+            var owner = sender as Form;
+            BeginSafeShutdownAsync(realChambers, owner);
+        }
+
+        private static void BeginSafeShutdownAsync(List<Chamber> chambers, Form owner)
+        {
+            Task.Run(() => SafeShutdownWorker(chambers, owner));
+        }
+
+        private static void SafeShutdownWorker(List<Chamber> chambers, Form owner)
+        {
+            try
+            {
+                forceCloseNowRequested = false;
+                var dialog = new SafeShutdownDialog();
+
+                if (owner != null)
+                {
+                    try
+                    {
+                        owner.BeginInvoke((Action)(() =>
+                        {
+                            dialog.CloseNowRequested += (s, e) => { forceCloseNowRequested = true; };
+                            dialog.Show(owner);
+                        }));
+                    }
+                    catch
+                    {
+                        dialog.CloseNowRequested += (s, e) => { forceCloseNowRequested = true; };
+                        try { dialog.Show(); } catch { }
+                    }
+                }
+                else
+                {
+                    dialog.CloseNowRequested += (s, e) => { forceCloseNowRequested = true; };
+                    try { dialog.Show(); } catch { }
+                }
+
+                // Step 1: enable control and set setpoints
+                foreach (var c in chambers)
+                {
+                    if (c == null) continue;
+                    try { ChamberCommands.SetRHSP(c, 35); } catch { }
+                    try { ChamberCommands.SetTempSP(c, 23); } catch { }
+                    try { ChamberCommands.SetTempControl(c, true); } catch { }
+                    try { ChamberCommands.SetRHControl(c, true); } catch { }
+                }
+
+                // Step 2: wait until stable within tolerances, or user forces immediate close
+                const double targetTemp = 23.0;
+                const double tempTol = 2.0;
+                const double targetRh = 35.0;
+                const double rhTol = 15.0;
+
+                while (!forceCloseNowRequested)
+                {
+                    bool allWithin = true;
+                    var statusLines = new List<string>();
+
+                    foreach (var c in chambers)
+                    {
+                        if (c == null) continue;
+
+                        double t = double.NaN;
+                        double rh = double.NaN;
+                        try { t = ParseDoubleOrDefault(ChamberCommands.GetTemp(c), double.NaN); } catch { }
+                        try { rh = ParseDoubleOrDefault(ChamberCommands.GetRH(c), double.NaN); } catch { }
+
+                        var tOk = !double.IsNaN(t) && Math.Abs(t - targetTemp) <= tempTol;
+                        var rhOk = !double.IsNaN(rh) && Math.Abs(rh - targetRh) <= rhTol;
+
+                        if (!tOk || !rhOk)
+                            allWithin = false;
+
+                        statusLines.Add($"{c.IPAddress}: Temp={(double.IsNaN(t) ? "?" : t.ToString("0.0", CultureInfo.InvariantCulture))}C {(tOk ? "OK" : "WAIT")}, RH={(double.IsNaN(rh) ? "?" : rh.ToString("0.0", CultureInfo.InvariantCulture))}% {(rhOk ? "OK" : "WAIT")}");
+                    }
+
+                    try { dialog.SetStatus(string.Join(Environment.NewLine, statusLines)); } catch { }
+
+                    if (allWithin)
+                        break;
+
+                    Thread.Sleep(2000);
+                }
+
+                // Step 3: disable controls (always do this before exiting)
+                foreach (var c in chambers)
+                {
+                    if (c == null) continue;
+                    try { ChamberCommands.SetTempControl(c, false); } catch { }
+                    try { ChamberCommands.SetRHControl(c, false); } catch { }
+                }
+
+                try { dialog.SetStatus("Controls turned off. Closing..."); } catch { }
+                Thread.Sleep(250);
+
+                try { dialog.SafeClose(); } catch { }
+
+                skipSafeShutdown = true;
+
+                try
+                {
+                    if (owner != null)
+                    {
+                        owner.BeginInvoke((Action)(() =>
+                        {
+                            try { owner.Close(); } catch { }
+                            try { Application.Exit(); } catch { }
+                        }));
+                    }
+                    else
+                    {
+                        try { Application.Exit(); } catch { }
+                    }
+                }
+                catch
+                {
+                    try { Application.Exit(); } catch { }
+                }
+            }
+            finally
+            {
+                safeShutdownInProgress = false;
+            }
+        }
+
+        private static void ReconnectSavedChambersOnStartup()
+        {
+            List<string> saved;
+            try
+            {
+                saved = IPConfigFrm.LoadSavedIpAddresses() ?? new List<string>();
+            }
+            catch
+            {
+                saved = new List<string>();
+            }
+
+            if (saved.Count == 0)
+                return;
+
+            foreach (var ip in saved.ToList())
+            {
+                if (string.IsNullOrWhiteSpace(ip))
+                    continue;
+
+                var trimmed = ip.Trim();
+
+                if (string.Equals(trimmed, "fake", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddFakeChamber();
+                    continue;
+                }
+
+                if (!TryValidateChamberIp(trimmed, out var address, out var reason))
+                {
+                    HandleInvalidSavedChamber(trimmed, reason ?? "Invalid IP address.");
+                    continue;
+                }
+
+                const int port = 6341;
+                if (!TryProbeChamber(address, port))
+                {
+                    HandleInvalidSavedChamber(trimmed, $"No response from device at {trimmed}:{port}.");
+                    continue;
+                }
+
+                AddOrUpdateChamber(trimmed);
+            }
+        }
+
+        private static void HandleInvalidSavedChamber(string ip, string message)
+        {
+            try
+            {
+                var result = MessageBox.Show(
+                    message + Environment.NewLine + Environment.NewLine + "Remove this chamber from the saved list?",
+                    "Chamber connection failed",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (result == DialogResult.Yes)
+                {
+                    try { IPConfigFrm.RemoveSavedIpAddress(ip); } catch { }
+                    RemoveChamberByIp(ip);
+                }
+            }
+            catch
+            {
+                // If UI can't be shown, do nothing.
+            }
+        }
+
+        private static void AddOrUpdateChamber(string ip)
+        {
+            lock (chambersLock)
+            {
+                if (ConnectedChambers == null)
+                    ConnectedChambers = new List<Chamber>();
+
+                var existing = ConnectedChambers.FirstOrDefault(c =>
+                    string.Equals(c?.IPAddress ?? string.Empty, ip, StringComparison.OrdinalIgnoreCase));
+
+                if (existing != null)
+                    return;
+
+                ConnectedChambers.Add(new Chamber { IPAddress = ip });
+            }
+        }
+
+
+        private static bool IsFakeChamber(Chamber chamber)
+        {
+            return chamber != null && string.Equals(chamber.IPAddress, FakeChamberIPAddress, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static double ParseDoubleOrDefault(string s, double defaultValue = 0.0)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+                return defaultValue;
+            if (double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v))
+                return v;
+            if (double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.CurrentCulture, out v))
+                return v;
+            return defaultValue;
+        }
+
+        private static bool ParseBoolOrDefault(string s, bool defaultValue = false)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+                return defaultValue;
+            var t = s.Trim();
+            if (t == "1") return true;
+            if (t == "0") return false;
+            if (bool.TryParse(t, out var b)) return b;
+            return defaultValue;
+        }
+
+        private static void StartChamberMonitoring(int intervalMs = ChamberUpdateIntervalMs)
+        {
+            lock (chamberTimerLock)
+            {
+                if (chamberMonitoringStarted)
+                    return;
+
+                chamberTimer = new System.Threading.Timer(ChamberMonitorCallback, null, 0, intervalMs);
+                chamberMonitoringStarted = true;
+            }
+        }
+
+        private static void StopChamberMonitoring()
+        {
+            lock (chamberTimerLock)
+            {
+                if (!chamberMonitoringStarted)
+                    return;
+
+                try { chamberTimer?.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
+                try { chamberTimer?.Dispose(); } catch { }
+                chamberTimer = null;
+                chamberMonitoringStarted = false;
+            }
+        }
+
+        private static void ChamberMonitorCallback(object state)
+        {
+            try
+            {
+                // Prevent overlap
+                try { chamberTimer?.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
+
+                List<Chamber> snapshot;
+                lock (chambersLock)
+                {
+                    snapshot = ConnectedChambers?.ToList() ?? new List<Chamber>();
+                }
+
+                if (snapshot.Count == 0)
+                    return;
+
+                foreach (var chamber in snapshot)
+                {
+                    if (chamber == null || string.IsNullOrWhiteSpace(chamber.IPAddress))
+                        continue;
+
+                    if (IsFakeChamber(chamber))
+                        continue;
+
+                    var ip = chamber.IPAddress.Trim();
+
+                    var needsStaticInit = false;
+                    lock (chambersLock)
+                    {
+                        if (!chamberStaticInitialized.Contains(ip))
+                        {
+                            needsStaticInit = true;
+                            chamberStaticInitialized.Add(ip);
+                        }
+                    }
+
+                    if (needsStaticInit)
+                    {
+                        try { PopulateChamberStaticInfo(chamber); }
+                        catch (Exception ex) { try { Debug.WriteLine($"Chamber static init failed for {ip}: {ex}"); } catch { } }
+                    }
+
+                    try { PopulateChamberDynamicInfo(chamber); }
+                    catch (Exception ex) { try { Debug.WriteLine($"Chamber dynamic update failed for {ip}: {ex}"); } catch { } }
+                }
+            }
+            catch (Exception exOuter)
+            {
+                try { Debug.WriteLine($"ChamberMonitorCallback: unexpected error: {exOuter}"); } catch { }
+            }
+            finally
+            {
+                try { chamberTimer?.Change(ChamberUpdateIntervalMs, ChamberUpdateIntervalMs); } catch { }
+            }
+        }
+
+        private static void PopulateChamberStaticInfo(Chamber chamber)
+        {
+            if (chamber == null)
+                return;
+
+            // Static data: Name, HC2-SSerial, DesccantHC2-SSerial, Version, ControllerSerial, Reference, ExtRefSerial.
+            // IPAddress is set on add.
+            chamber.Name = ChamberCommands.GetName(chamber);
+            chamber.HC2Serial = ChamberCommands.GetHC2SSerial(chamber);
+            chamber.DessicantSerial = ChamberCommands.GetDesiccantHC2SSerial(chamber);
+            chamber.Version = ChamberCommands.GetVersion(chamber);
+            chamber.ControllerSerial = ChamberCommands.GetControllerSerial(chamber);
+            _ = ChamberCommands.GetReference(chamber);
+            chamber.ExtRefSerial = ChamberCommands.GetExtRefSerial(chamber);
+        }
+
+        private static void PopulateChamberDynamicInfo(Chamber chamber)
+        {
+            if (chamber == null)
+                return;
+
+            // Dynamic Data
+            chamber.Temperature = ParseDoubleOrDefault(ChamberCommands.GetTemp(chamber), chamber.Temperature);
+            chamber.TemperatureReference = ParseDoubleOrDefault(ChamberCommands.GetTempRef(chamber), chamber.TemperatureReference);
+            chamber.TempControl = ParseBoolOrDefault(ChamberCommands.GetTempControl(chamber), chamber.TempControl);
+            chamber.TemperatureSP = ParseDoubleOrDefault(ChamberCommands.GetTempSP(chamber), chamber.TemperatureSP);
+            chamber.TempStable = ParseBoolOrDefault(ChamberCommands.GetTempStable(chamber), chamber.TempStable);
+
+            chamber.Humidity = ParseDoubleOrDefault(ChamberCommands.GetRH(chamber), chamber.Humidity);
+            chamber.HumidityReference = ParseDoubleOrDefault(ChamberCommands.GetRHRef(chamber), chamber.HumidityReference);
+            chamber.HumControl = ParseBoolOrDefault(ChamberCommands.GetRHControl(chamber), chamber.HumControl);
+            chamber.HumiditySP = ParseDoubleOrDefault(ChamberCommands.GetRHSP(chamber), chamber.HumiditySP);
+            chamber.HumStable = ParseBoolOrDefault(ChamberCommands.GetRHStable(chamber), chamber.HumStable);
+
+            chamber.DessicentLevel = ParseDoubleOrDefault(ChamberCommands.GetDesiccant1DP(chamber), chamber.DessicentLevel);
+            chamber.WaterLevel = ParseDoubleOrDefault(ChamberCommands.GetWaterLevel(chamber), chamber.WaterLevel);
+
+            chamber.ExtRefTemp = ParseDoubleOrDefault(ChamberCommands.GetExtRefTemp(chamber), chamber.ExtRefTemp);
+            chamber.ExtRefDP = ParseDoubleOrDefault(ChamberCommands.GetExtRefDP(chamber), chamber.ExtRefDP);
+            chamber.ExtRefDPCorr = ParseDoubleOrDefault(ChamberCommands.GetExtRefDPCorr(chamber), chamber.ExtRefDPCorr);
+            chamber.ExtRefFP = ParseDoubleOrDefault(ChamberCommands.GetExtRefFP(chamber), chamber.ExtRefFP);
+            chamber.ExtRefRH = ParseDoubleOrDefault(ChamberCommands.GetExtRefRH(chamber), chamber.ExtRefRH);
+            chamber.ExtRefControl = ParseBoolOrDefault(ChamberCommands.GetExtRefControl(chamber), chamber.ExtRefControl);
+            chamber.ExtRefStable = ParseBoolOrDefault(ChamberCommands.GetExtRefStable(chamber), chamber.ExtRefStable);
+
+            chamber.ProgramRunning = ParseBoolOrDefault(ChamberCommands.GetProgramRun(chamber), chamber.ProgramRunning);
+        }
+
+
+        /*
+         * chamber monitor plans:
+         * for each connected chamber, on startup gather all information from chamber,
+         * then peridocally update dynamic info every 15 seconds.
+         * static data: IPAddress (set on add, cannot be queried from device), Name, HC2-SSerial, DesccantHC2-SSerial, Version, ControllerSerial, Reference, ExtRefSerial.
+         * Dynamic Data: Temp, TempRef, TempControl, TempSP, TempStable, RH, RHRef, RHControl, RHSP, RHStable, Descicant1DP,
+         * ExtRefTemp, ExtRefDP, ExtRefDPCorr, ExtRefFP, ExtRefRH, ExtRefControl, ExtRefStable, Warning, ProgramRun
+         */
+        private static void RemoveChamberByIp(string ip)
+        {
+            lock (chambersLock)
+            {
+                if (ConnectedChambers == null || ConnectedChambers.Count == 0)
+                    return;
+
+                ConnectedChambers.RemoveAll(c => string.Equals(c?.IPAddress, ip, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        private static bool TryValidateChamberIp(string ip, out IPAddress address, out string error)
+        {
+            address = null;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(ip))
+            {
+                error = "IP address cannot be empty.";
+                return false;
+            }
+
+            ip = ip.Trim();
+
+            if (!IPAddress.TryParse(ip, out address))
+            {
+                error = "Incorrect IP address format.";
+                return false;
+            }
+
+            if (address.AddressFamily != AddressFamily.InterNetwork)
+            {
+                error = "Only IPv4 addresses are supported.";
+                return false;
+            }
+
+            var octets = address.GetAddressBytes();
+
+            if (octets[0] == 0 && octets[1] == 0 && octets[2] == 0 && octets[3] == 0)
+            {
+                error = "The unspecified address (0.0.0.0) is not allowed.";
+                return false;
+            }
+
+            if (octets[0] == 255 && octets[1] == 255 && octets[2] == 255 && octets[3] == 255)
+            {
+                error = "The broadcast address (255.255.255.255) is not allowed.";
+                return false;
+            }
+
+            if (octets[0] == 0)
+            {
+                error = "IP address cannot start with 0.";
+                return false;
+            }
+
+            if (octets[0] == 127)
+            {
+                error = "Loopback addresses (127.x.x.x) are not allowed.";
+                return false;
+            }
+
+            if (octets[0] >= 224 && octets[0] <= 239)
+            {
+                error = "Multicast addresses (224.0.0.0/4) are not allowed.";
+                return false;
+            }
+
+            if (octets[0] >= 240 && octets[0] <= 254)
+            {
+                error = "Reserved or experimental address ranges are not allowed.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryProbeChamber(IPAddress address, int port, int connectTimeoutMs = 1500, int readTimeoutMs = 2000)
+        {
+            try
+            {
+                var ip = address.ToString();
+                var chamber = new Chamber { IPAddress = ip };
+                var resp = ChamberCommands.SendResponse(chamber, "Name?", port, connectTimeoutMs, readTimeoutMs);
+                return !string.IsNullOrWhiteSpace(resp);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        
 
         // Start periodic monitoring (threadpool timer)
         public static void StartProbeMonitoring(int intervalMs = 2000)
@@ -156,7 +693,7 @@ namespace Rotronic
                             var respMirror = SendRead(existing, "IDN?\r\n", 500);
                             if (!string.IsNullOrWhiteSpace(respMirror) && respMirror.IndexOf("473", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                var m = new Mirror { ComPort = portName, ID = respMirror, IDN = "473" };
+                                var m = new Mirror { ComPort = portName, ID = respMirror, IDN = "473", InUse = false };
                                 // get serial number
                                 var snMirror = SendRead(existing, "SN?\r\n", 500);
                                 if (!string.IsNullOrWhiteSpace(snMirror))
@@ -286,9 +823,12 @@ namespace Rotronic
             string serialNumber = "27-123456",
             bool stable = true)
         {
+            // Fake mirrors must have a unique ComPort because the UI (and refresh diffing) uses ComPort as the mirror key.
+            // If all fake mirrors share the same ComPort, refresh will treat them as the same device and collapse the rows.
+            var fakeKey = FakeMirrorComPort + ":" + (serialNumber ?? string.Empty);
             var fake = new Mirror
             {
-                ComPort = FakeMirrorComPort,
+                ComPort = fakeKey,
                 IDN = idn,
                 ID = idn,
                 MirrorTemp = mirrorTemp,
@@ -339,7 +879,7 @@ namespace Rotronic
                 if (ConnectedMirrors == null || ConnectedMirrors.Count == 0)
                     return;
 
-                ConnectedMirrors.RemoveAll(m => string.Equals(m?.ComPort, FakeMirrorComPort, StringComparison.OrdinalIgnoreCase));
+                ConnectedMirrors.RemoveAll(m => m != null && !string.IsNullOrWhiteSpace(m.ComPort) && m.ComPort.StartsWith(FakeMirrorComPort, StringComparison.OrdinalIgnoreCase));
             }
             try { Debug.WriteLine("RemoveFakeMirrors: fake mirror(s) removed"); } catch { }
         }
@@ -355,7 +895,7 @@ namespace Rotronic
                 if (ConnectedMirrors == null || ConnectedMirrors.Count ==0)
                     return;
 
-                foreach (var m in ConnectedMirrors.Where(m => string.Equals(m?.ComPort, FakeMirrorComPort, StringComparison.OrdinalIgnoreCase)))
+                foreach (var m in ConnectedMirrors.Where(m => m != null && !string.IsNullOrWhiteSpace(m.ComPort) && m.ComPort.StartsWith(FakeMirrorComPort, StringComparison.OrdinalIgnoreCase)))
                 {
                     if (m == null)
                         continue;
@@ -372,6 +912,55 @@ namespace Rotronic
             try { Debug.WriteLine("UpdateAllFakeMirrors: updated fake mirrors"); } catch { }
         }
 
+        /// <summary>
+        /// Update all fake probes previously added with AddFakeProbe.
+        /// This updates fields in-place so any UI references to the RotProbe instances will reflect the changes.
+        /// </summary>
+        public static void UpdateAllFakeProbes(double temperature, double humidity, int? temperatureCount = null, double? resistance = null)
+        {
+            lock (probesLock)
+            {
+                if (ConnectedProbes == null || ConnectedProbes.Count == 0)
+                    return;
+
+                foreach (var p in ConnectedProbes.Where(p => p != null && !string.IsNullOrWhiteSpace(p.DeviceModel) && string.Equals(p.DeviceModel, "Fake", StringComparison.OrdinalIgnoreCase)))
+                {
+                    p.Temperature = temperature;
+                    p.Humidity = humidity;
+                    if (temperatureCount.HasValue)
+                        p.TemperatureCount = temperatureCount.Value;
+                    if (resistance.HasValue)
+                        p.Resistance = resistance.Value;
+                }
+            }
+            try { Debug.WriteLine("UpdateAllFakeProbes: updated fake probes"); } catch { }
+        }
+
+        /// <summary>
+        /// Update all fake chambers previously added with AddFakeChamber.
+        /// This updates fields in-place so any UI references to the Chamber instances will reflect the changes.
+        /// </summary>
+        public static void UpdateAllFakeChambers(double temperature, double humidity, double temperatureSp, double humiditySp)
+        {
+            lock (chambersLock)
+            {
+                if (ConnectedChambers == null || ConnectedChambers.Count == 0)
+                    return;
+
+                foreach (var c in ConnectedChambers.Where(c => IsFakeChamber(c)))
+                {
+                    if (c == null)
+                        continue;
+
+                    c.Temperature = temperature;
+                    c.Humidity = humidity;
+                    c.TemperatureSP = temperatureSp;
+                    c.HumiditySP = humiditySp;
+                }
+            }
+            try { Debug.WriteLine("UpdateAllFakeChambers: updated fake chambers"); } catch { }
+        }
+
         // Update DP? and Tx? for known mirrors. Works with real mirrors (serial IO) and with fake mirrors
         // whose ComPort == FakeMirrorComPort (no IO, just preserve supplied values).
         public static List<Mirror> UpdateMirrorData(List<Mirror> mirrors)
@@ -386,7 +975,7 @@ namespace Rotronic
                     continue;
 
                 // If this is a fake mirror marker, skip serial IO and return the instance as-is
-                if (string.Equals(m.ComPort, FakeMirrorComPort, StringComparison.OrdinalIgnoreCase))
+                if (m.ComPort.StartsWith(FakeMirrorComPort, StringComparison.OrdinalIgnoreCase))
                 {
                     // Ensure basic fields exist (defensive)
                     if (string.IsNullOrEmpty(m.IDN))
@@ -540,6 +1129,151 @@ namespace Rotronic
             }
         }
 
+        public static List<Chamber> GetConnectedChambersSnapshot()
+        {
+            lock (chambersLock)
+            {
+                return ConnectedChambers?.ToList() ?? new List<Chamber>();
+            }
+        }
+
+        private const string FakeChamberIPAddress = "__FAKE_CHAMBER__";
+
+        /// <summary>
+        /// Add a removable fake chamber for testing UI/logic without implementing Ethernet connectivity yet.
+        /// Use RemoveFakeChambers() to remove it.
+        /// If IPAddress matches an existing fake chamber, update that instance in-place.
+        /// </summary>
+        public static void AddFakeChamber(
+            string IPAddress = FakeChamberIPAddress,
+            string Name = "Fake Chamber",
+            double Temperature = 23.0,
+            double Humidity = 10.0,
+            double TemperatureSP = 23.0,
+            double HumiditySP = 10.0,
+            bool TempControl = true,
+            bool HumControl = true,
+            bool TempStable = true,
+            bool HumStable = true,
+            string Version = "V1.0",
+            string ControllerSerial = "CTRL-000001",
+            string HC2Serial = "HC2-000001",
+            string DessicantSerial = "DES-000001",
+            string Warning = "Not A real Chamber",
+            bool ProgramRunning = false)
+        {
+            var fake = new Chamber
+            {
+                IPAddress = IPAddress,
+                Name = Name,
+                Temperature = Temperature,
+                Humidity = Humidity,
+                TemperatureSP = TemperatureSP,
+                HumiditySP = HumiditySP,
+                TempControl = TempControl,
+                HumControl = HumControl,
+                TempStable = TempStable,
+                HumStable = HumStable,
+                Version = Version,
+                ControllerSerial = ControllerSerial,
+                HC2Serial = HC2Serial,
+                DessicantSerial = DessicantSerial,
+                Warning = Warning,
+                ProgramRunning = ProgramRunning
+            };
+
+            lock (chambersLock)
+            {
+                if (ConnectedChambers == null)
+                    ConnectedChambers = new List<Chamber>();
+
+                var key = fake.IPAddress ?? string.Empty;
+                var existing = ConnectedChambers.FirstOrDefault(c =>
+                    string.Equals(c?.IPAddress ?? string.Empty, key, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    existing.Name = fake.Name;
+                    existing.Temperature = fake.Temperature;
+                    existing.Humidity = fake.Humidity;
+                    existing.TemperatureSP = fake.TemperatureSP;
+                    existing.HumiditySP = fake.HumiditySP;
+                    existing.TempControl = fake.TempControl;
+                    existing.HumControl = fake.HumControl;
+                    existing.TempStable = fake.TempStable;
+                    existing.HumStable = fake.HumStable;
+                    existing.Version = fake.Version;
+                    existing.ControllerSerial = fake.ControllerSerial;
+                    existing.HC2Serial = fake.HC2Serial;
+                    existing.DessicantSerial = fake.DessicantSerial;
+                    existing.Warning = fake.Warning;
+                    existing.ProgramRunning = fake.ProgramRunning;
+                    try { Debug.WriteLine("AddFakeChamber: updated existing fake chamber"); } catch { }
+                    return;
+                }
+
+                ConnectedChambers.Add(fake);
+            }
+
+            try { Debug.WriteLine("AddFakeChamber: fake chamber added"); } catch { }
+        }
+
+        /// <summary>
+        /// Remove any fake chambers previously added with AddFakeChamber.
+        /// </summary>
+        public static void RemoveFakeChambers()
+        {
+            lock (chambersLock)
+            {
+                if (ConnectedChambers == null || ConnectedChambers.Count == 0)
+                    return;
+
+                ConnectedChambers.RemoveAll(c => string.Equals(c?.IPAddress, FakeChamberIPAddress, StringComparison.OrdinalIgnoreCase));
+            }
+            try { Debug.WriteLine("RemoveFakeChambers: fake chamber(s) removed"); } catch { }
+        }
+
+        /// <summary>
+        /// Update all fake chambers previously added with AddFakeChamber.
+        /// Updates fields in-place so any UI references remain valid.
+        /// </summary>
+        public static void UpdateAllFakeChambers(
+            double? Temperature = null,
+            double? Humidity = null,
+            double? TemperatureSP = null,
+            double? HumiditySP = null,
+            bool? TempControl = null,
+            bool? HumControl = null,
+            bool? TempStable = null,
+            bool? HumStable = null,
+            string Warning = null,
+            bool? ProgramRunning = null)
+        {
+            lock (chambersLock)
+            {
+                if (ConnectedChambers == null || ConnectedChambers.Count == 0)
+                    return;
+
+                foreach (var c in ConnectedChambers.Where(c => string.Equals(c?.IPAddress, FakeChamberIPAddress, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (c == null)
+                        continue;
+
+                    if (Temperature.HasValue) c.Temperature = Temperature.Value;
+                    if (Humidity.HasValue) c.Humidity = Humidity.Value;
+                    if (TemperatureSP.HasValue) c.TemperatureSP = TemperatureSP.Value;
+                    if (HumiditySP.HasValue) c.HumiditySP = HumiditySP.Value;
+                    if (TempControl.HasValue) c.TempControl = TempControl.Value;
+                    if (HumControl.HasValue) c.HumControl = HumControl.Value;
+                    if (TempStable.HasValue) c.TempStable = TempStable.Value;
+                    if (HumStable.HasValue) c.HumStable = HumStable.Value;
+                    if (Warning != null) c.Warning = Warning;
+                    if (ProgramRunning.HasValue) c.ProgramRunning = ProgramRunning.Value;
+                }
+            }
+
+            try { Debug.WriteLine("UpdateAllFakeChambers: updated fake chambers"); } catch { }
+        }
+
         // Timer callback: discover on first run (ComTest), otherwise update existing (probes + mirrors)
         private static void MonitorCallback(object state)
         {
@@ -619,8 +1353,28 @@ namespace Rotronic
                             var idx = ConnectedProbes.FindIndex(p => string.Equals(p?.ComPort, up.ComPort, StringComparison.OrdinalIgnoreCase));
                             if (idx >= 0)
                             {
-                                // Replace reference so UI consumers see the updated object instance
-                                ConnectedProbes[idx] = up;
+                                // Preserve the existing instance for fake probes so UI references (and selection/InUse)
+                                // do not break when background monitoring runs.
+                                var existing = ConnectedProbes[idx];
+                                if (existing != null && string.Equals(existing.DeviceModel ?? string.Empty, "Fake", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    try
+                                    {
+                                        // Update dynamic fields in-place
+                                        existing.Temperature = up.Temperature;
+                                        existing.Humidity = up.Humidity;
+                                        existing.Resistance = up.Resistance;
+                                        existing.TemperatureCount = up.TemperatureCount;
+                                        existing.HumidityCount = up.HumidityCount;
+                                        existing.HumdityRaw = up.HumdityRaw;
+                                    }
+                                    catch { }
+                                }
+                                else
+                                {
+                                    // Replace reference so UI consumers see the updated object instance
+                                    ConnectedProbes[idx] = up;
+                                }
                             }
                             else
                             {
@@ -1721,6 +2475,33 @@ namespace Rotronic
                 if (ConnectedProbes == null)
                     ConnectedProbes = new List<RotProbe>();
 
+                // Prevent duplicates by COM port (this is what the UI/editing and monitoring logic tends to key off of).
+                // If a probe already exists for the same COM port, update it in-place.
+                if (!string.IsNullOrWhiteSpace(ComPort))
+                {
+                    var existingByPort = ConnectedProbes.FirstOrDefault(p =>
+                        string.Equals(p?.ComPort, ComPort, StringComparison.OrdinalIgnoreCase));
+                    if (existingByPort != null)
+                    {
+                        existingByPort.ProbeType = fake.ProbeType;
+                        existingByPort.ProbeAddress = fake.ProbeAddress;
+                        existingByPort.DeviceType = fake.DeviceType;
+                        existingByPort.Humidity = fake.Humidity;
+                        existingByPort.Temperature = fake.Temperature;
+                        existingByPort.TemperatureUnit = fake.TemperatureUnit;
+                        existingByPort.CalculatedParameter = fake.CalculatedParameter;
+                        existingByPort.CalculatedValue = fake.CalculatedValue;
+                        existingByPort.DeviceModel = fake.DeviceModel;
+                        existingByPort.DeviceName = fake.DeviceName;
+                        existingByPort.AlarmByte = fake.AlarmByte;
+                        existingByPort.CelsiusHelper = fake.CelsiusHelper;
+                        if (!string.IsNullOrWhiteSpace(fake.SerialNumber))
+                            existingByPort.SerialNumber = fake.SerialNumber;
+                        try { Debug.WriteLine("AddFakeProbe: updated existing fake probe by ComPort"); } catch { }
+                        return;
+                    }
+                }
+
                 // If a fake probe with the same serial number exists, update its values in-place so any UI references stay valid.
                 if (!string.IsNullOrWhiteSpace(SerialNumber))
                 {
@@ -1728,6 +2509,7 @@ namespace Rotronic
                         string.Equals(p?.SerialNumber, SerialNumber, StringComparison.OrdinalIgnoreCase));
                     if (existing != null)
                     {
+                        existing.ComPort = fake.ComPort;
                         existing.ProbeType = fake.ProbeType;
                         existing.ProbeAddress = fake.ProbeAddress;
                         existing.DeviceType = fake.DeviceType;
@@ -1738,8 +2520,9 @@ namespace Rotronic
                         existing.CalculatedValue = fake.CalculatedValue;
                         existing.DeviceModel = fake.DeviceModel;
                         existing.DeviceName = fake.DeviceName;
+                        existing.AlarmByte = fake.AlarmByte;
                         existing.CelsiusHelper = fake.CelsiusHelper;
-                        // keep ComPort and SerialNumber unchanged (should already match)
+                        // keep SerialNumber unchanged (should already match)
                         try { Debug.WriteLine("AddFakeProbe: updated existing fake probe"); } catch { }
                         return;
                     }

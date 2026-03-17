@@ -27,7 +27,93 @@ namespace Rotronic
 
         private void buttonAdd_Click(object sender, EventArgs e)
         {
-            ValidateIP(textBoxIP.Text);
+            var ip = textBoxIP.Text;
+
+            if (ValidateIP(ip))
+            {
+                SaveIpAddress(ip);
+                textBoxIP.Clear();
+            }
+        }
+
+        internal static string GetIpStorePath()
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Rotronic");
+
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "ips.txt");
+        }
+
+        public static void RemoveSavedIpAddress(string ip)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(ip))
+                    return;
+
+                ip = ip.Trim();
+                var path = GetIpStorePath();
+                if (!File.Exists(path))
+                    return;
+
+                var remaining = File.ReadAllLines(path)
+                    .Select(l => (l ?? string.Empty).Trim())
+                    .Where(l => l.Length > 0)
+                    .Where(l => !string.Equals(l, ip, StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                File.WriteAllLines(path, remaining);
+            }
+            catch
+            {
+                // ignore file IO errors
+            }
+        }
+
+        private void SaveIpAddress(string ip)
+        {
+            if (string.IsNullOrWhiteSpace(ip)) return;
+
+            ip = ip.Trim();
+            string path = GetIpStorePath();
+
+            // De-dupe (case-insensitive) and append
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (File.Exists(path))
+            {
+                foreach (var line in File.ReadAllLines(path))
+                {
+                    var s = (line ?? string.Empty).Trim();
+                    if (s.Length > 0) existing.Add(s);
+                }
+            }
+
+            if (existing.Add(ip))
+            {
+                File.AppendAllText(path, ip + Environment.NewLine);
+            }
+        }
+
+        public static List<string> LoadSavedIpAddresses()
+        {
+            string path = GetIpStorePath();
+            var result = new List<string>();
+
+            if (!File.Exists(path))
+                return result;
+
+            foreach (var line in File.ReadAllLines(path))
+            {
+                var s = (line ?? string.Empty).Trim();
+                if (s.Length == 0) continue;
+                if (!result.Contains(s, StringComparer.OrdinalIgnoreCase))
+                    result.Add(s);
+            }
+
+            return result;
         }
 
         /* 
@@ -57,6 +143,11 @@ namespace Rotronic
 
         private bool ValidateIP(string ip)
         {
+            if (ip == "fake")
+            {
+                Program.AddFakeChamber();
+                return true;
+            }
             if (string.IsNullOrWhiteSpace(ip))
             {
                 MessageBox.Show("IP address cannot be empty.");
@@ -150,69 +241,26 @@ namespace Rotronic
              - Ensure stream and client are closed/disposed in finally.
             */
 
-            TcpClient client = null;
             try
             {
-                client = new TcpClient();
-                var connectTask = client.ConnectAsync(address, port);
-                bool connected = connectTask.Wait(connectTimeoutMs);
-                if (!connected || !client.Connected)
-                {
+                var chamber = new Chamber { IPAddress = address.ToString() };
+                var response = ChamberCommands.SendResponse(chamber, "Name?", port, connectTimeoutMs, readTimeoutMs);
+                if (string.IsNullOrWhiteSpace(response))
                     return false;
-                }
 
-                using (NetworkStream stream = client.GetStream())
+                try
                 {
-                    stream.ReadTimeout = readTimeoutMs;
-                    stream.WriteTimeout = readTimeoutMs;
-
-                    byte[] send = Encoding.ASCII.GetBytes("Name?\r\n");
-                    stream.Write(send, 0, send.Length);
-                    stream.Flush();
-
-                    // Read response (single blocking read). If there's any data, treat as success.
-                    byte[] buffer = new byte[512];
-                    int bytesRead = 0;
-                    try
-                    {
-                        bytesRead = stream.Read(buffer, 0, buffer.Length);
-                    }
-                    catch (IOException)
-                    {
-                        // Read timed out or network error
-                        return false;
-                    }
-
-                    if (bytesRead <= 0)
-                    {
-                        return false;
-                    }
-
-                    // Convert response to string and show it to the user
-                    string response = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim('\r', '\n', '\0');
-                    try
-                    {
-                        MessageBox.Show(response, $"Response from {address}:{port}", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    catch
-                    {
-                        // If showing a MessageBox fails for any reason, ignore and continue returning success.
-                    }
-
-                    return true;
+                    MessageBox.Show(response, $"Response from {address}:{port}", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                catch
+                {
+                }
+
+                return true;
             }
             catch
             {
                 return false;
-            }
-            finally
-            {
-                if (client != null)
-                {
-                    try { client.Close(); } catch { }
-                    client = null;
-                }
             }
         }
     }

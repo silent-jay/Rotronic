@@ -22,11 +22,30 @@ namespace Rotronic
         public event EventHandler ProbesRefreshed;
         public event EventHandler MirrorsRefreshed;
 
+        public event EventHandler ChambersRefreshed;
+
         // Last-known summary state to avoid unnecessary UI rebuilds
         private List<string> _lastProbeKeys;
         private List<string> _lastProbeColumnNames;
         private List<string> _lastMirrorKeys;
         private List<string> _lastMirrorColumnNames;
+
+        private List<string> _lastChamberKeys;
+        private List<string> _lastChamberColumnNames;
+
+        private int _colIdxChamberTempControl = -1;
+        private int _colIdxChamberHumControl = -1;
+        private int _colIdxChamberTempSp = -1;
+        private int _colIdxChamberHumSp = -1;
+        private int _colIdxChamberTempStable = -1;
+        private int _colIdxChamberHumStable = -1;
+        private int _colIdxChamberExtRefStable = -1;
+        private bool _chamberListViewClickWired;
+
+        private TextBox _chamberEditBox;
+        private ListViewItem _chamberEditItem;
+        private int _chamberEditSubIndex = -1;
+        private Rectangle _chamberEditBounds;
 
         public Main()
         {
@@ -76,13 +95,575 @@ namespace Rotronic
             // Initial population
             RefreshConnectedProbes();
             RefreshConnectedMirrors();
+
+            WireChamberListViewControls();
+
+        }
+
+        private void WireChamberListViewControls()
+        {
+            if (listViewChamber == null || _chamberListViewClickWired)
+                return;
+
+            _chamberListViewClickWired = true;
+
+            listViewChamber.OwnerDraw = true;
+            listViewChamber.DrawColumnHeader -= ListViewChamber_DrawColumnHeader;
+            listViewChamber.DrawColumnHeader += ListViewChamber_DrawColumnHeader;
+            listViewChamber.DrawSubItem -= ListViewChamber_DrawSubItem;
+            listViewChamber.DrawSubItem += ListViewChamber_DrawSubItem;
+            listViewChamber.MouseUp -= ListViewChamber_MouseUp;
+            listViewChamber.MouseUp += ListViewChamber_MouseUp;
+            listViewChamber.Scrollable = true;
+            listViewChamber.KeyDown -= ListViewChamber_KeyDown;
+            listViewChamber.KeyDown += ListViewChamber_KeyDown;
+        }
+
+        private void UpdateChamberControlColumnIndexes()
+        {
+            _colIdxChamberTempControl = -1;
+            _colIdxChamberHumControl = -1;
+            _colIdxChamberTempSp = -1;
+            _colIdxChamberHumSp = -1;
+            _colIdxChamberTempStable = -1;
+            _colIdxChamberHumStable = -1;
+            _colIdxChamberExtRefStable = -1;
+
+            if (listViewChamber == null || listViewChamber.Columns == null)
+                return;
+
+            for (int i = 0; i < listViewChamber.Columns.Count; i++)
+            {
+                var name = listViewChamber.Columns[i]?.Name ?? string.Empty;
+                if (_colIdxChamberTempControl < 0 && string.Equals(name, ChamberDisplayOptions.Field.TempControl.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberTempControl = i;
+                if (_colIdxChamberHumControl < 0 && string.Equals(name, ChamberDisplayOptions.Field.HumControl.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberHumControl = i;
+                if (_colIdxChamberTempSp < 0 && string.Equals(name, ChamberDisplayOptions.Field.TemperatureSP.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberTempSp = i;
+                if (_colIdxChamberHumSp < 0 && string.Equals(name, ChamberDisplayOptions.Field.HumiditySP.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberHumSp = i;
+                if (_colIdxChamberTempStable < 0 && string.Equals(name, ChamberDisplayOptions.Field.TempStable.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberTempStable = i;
+                if (_colIdxChamberHumStable < 0 && string.Equals(name, ChamberDisplayOptions.Field.HumStable.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberHumStable = i;
+                if (_colIdxChamberExtRefStable < 0 && string.Equals(name, ChamberDisplayOptions.Field.ExtRefStable.ToString(), StringComparison.OrdinalIgnoreCase))
+                    _colIdxChamberExtRefStable = i;
+            }
+        }
+
+        private static bool TryParseBoolish(string text, out bool value)
+        {
+            value = false;
+            if (text == null) return false;
+            var t = text.Trim();
+            if (t.Length == 0) return false;
+
+            if (string.Equals(t, "1", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "on", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "yes", StringComparison.OrdinalIgnoreCase))
+            {
+                value = true;
+                return true;
+            }
+            if (string.Equals(t, "0", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "false", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "off", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "no", StringComparison.OrdinalIgnoreCase))
+            {
+                value = false;
+                return true;
+            }
+
+            return bool.TryParse(t, out value);
+        }
+
+        private static Rectangle GetCheckboxBounds(Rectangle cellBounds)
+        {
+            var cb = System.Windows.Forms.CheckBoxRenderer.GetGlyphSize(System.Drawing.Graphics.FromHwnd(IntPtr.Zero), System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedNormal);
+            int x = cellBounds.Left + 6;
+            int y = cellBounds.Top + (cellBounds.Height - cb.Height) / 2;
+            return new Rectangle(x, y, cb.Width, cb.Height);
+        }
+
+        private bool IsChamberControlColumn(int colIndex)
+        {
+            return colIndex >= 0 && (colIndex == _colIdxChamberTempControl || colIndex == _colIdxChamberHumControl);
+        }
+
+        private bool IsChamberEditableSetpointColumn(int colIndex)
+        {
+            return colIndex >= 0 && (colIndex == _colIdxChamberTempSp || colIndex == _colIdxChamberHumSp);
+        }
+
+        private bool IsChamberStableColumn(int colIndex)
+        {
+            return colIndex >= 0 && (colIndex == _colIdxChamberTempStable || colIndex == _colIdxChamberHumStable || colIndex == _colIdxChamberExtRefStable);
+        }
+
+        private void EndChamberCellEdit(bool commit)
+        {
+            if (_chamberEditBox == null)
+                return;
+
+            var editBox = _chamberEditBox;
+            var item = _chamberEditItem;
+            var subIndex = _chamberEditSubIndex;
+            var bounds = _chamberEditBounds;
+
+            _chamberEditBox = null;
+            _chamberEditItem = null;
+            _chamberEditSubIndex = -1;
+            _chamberEditBounds = Rectangle.Empty;
+
+            try { listViewChamber.Controls.Remove(editBox); } catch { }
+            try { editBox.Hide(); } catch { }
+            try { editBox.Dispose(); } catch { }
+
+            if (!commit)
+            {
+                try { listViewChamber.Invalidate(bounds); } catch { }
+                return;
+            }
+
+            if (item == null || subIndex < 0 || subIndex >= item.SubItems.Count)
+                return;
+
+            var chamber = item.Tag as Chamber;
+            if (chamber == null)
+                return;
+
+            var text = (editBox.Text ?? string.Empty).Trim();
+            if (!double.TryParse(text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var value))
+            {
+                if (!double.TryParse(text, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out value))
+                    return;
+            }
+
+            bool ok = false;
+            if (subIndex == _colIdxChamberTempSp)
+                ok = ChamberCommands.SetTempSP(chamber, value);
+            else if (subIndex == _colIdxChamberHumSp)
+                ok = ChamberCommands.SetRHSP(chamber, value);
+
+            if (ok)
+            {
+                item.SubItems[subIndex].Text = value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                try { listViewChamber.Invalidate(bounds); } catch { }
+            }
+        }
+
+        private void BeginChamberCellEdit(ListViewItem item, ListViewItem.ListViewSubItem subItem, int subIndex)
+        {
+            if (listViewChamber == null || item == null || subItem == null)
+                return;
+            if (!IsChamberEditableSetpointColumn(subIndex))
+                return;
+
+            EndChamberCellEdit(commit: false);
+
+            _chamberEditItem = item;
+            _chamberEditSubIndex = subIndex;
+            _chamberEditBounds = subItem.Bounds;
+
+            var tb = new TextBox();
+            tb.BorderStyle = BorderStyle.FixedSingle;
+            tb.Text = subItem.Text;
+            tb.Bounds = new Rectangle(subItem.Bounds.Left + 2, subItem.Bounds.Top + 2, Math.Max(20, subItem.Bounds.Width - 4), Math.Max(18, subItem.Bounds.Height - 4));
+            tb.Visible = true;
+
+            tb.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    EndChamberCellEdit(commit: true);
+                }
+                else if (e.KeyCode == Keys.Escape)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    EndChamberCellEdit(commit: false);
+                }
+            };
+            tb.LostFocus += (s, e) => EndChamberCellEdit(commit: true);
+
+            _chamberEditBox = tb;
+            listViewChamber.Controls.Add(tb);
+            tb.BringToFront();
+            tb.Focus();
+            tb.SelectAll();
+        }
+
+        private void ListViewChamber_DrawColumnHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            e.DrawDefault = true;
+        }
+
+        private void ListViewChamber_DrawSubItem(object sender, DrawListViewSubItemEventArgs e)
+        {
+            if (!IsChamberControlColumn(e.ColumnIndex))
+            {
+                if (!IsChamberStableColumn(e.ColumnIndex))
+                {
+                    e.DrawDefault = true;
+                    return;
+                }
+            }
+
+            bool value = false;
+            TryParseBoolish(e.SubItem?.Text, out value);
+
+            var selected = (e.ItemState & ListViewItemStates.Selected) != 0;
+            e.Graphics.FillRectangle(selected ? SystemBrushes.Highlight : SystemBrushes.Window, e.Bounds);
+
+            if (IsChamberControlColumn(e.ColumnIndex))
+            {
+                var state = value ? System.Windows.Forms.VisualStyles.CheckBoxState.CheckedNormal : System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedNormal;
+                var cbBounds = GetCheckboxBounds(e.Bounds);
+                System.Windows.Forms.CheckBoxRenderer.DrawCheckBox(e.Graphics, cbBounds.Location, state);
+            }
+            else
+            {
+                // Stable indicator: green circle for true, red circle for false
+                var diameter = Math.Min(e.Bounds.Height - 6, 14);
+                if (diameter < 6) diameter = Math.Min(e.Bounds.Height - 2, e.Bounds.Width - 2);
+                if (diameter < 4)
+                {
+                    e.DrawDefault = true;
+                    return;
+                }
+
+                int x = e.Bounds.Left + 6;
+                int y = e.Bounds.Top + (e.Bounds.Height - diameter) / 2;
+                var circle = new Rectangle(x, y, diameter, diameter);
+                using (var brush = new SolidBrush(value ? Color.LimeGreen : Color.Red))
+                    e.Graphics.FillEllipse(brush, circle);
+                using (var pen = new Pen(Color.DimGray))
+                    e.Graphics.DrawEllipse(pen, circle);
+            }
+
+            if (selected)
+            {
+                using (var p = new Pen(SystemColors.Highlight))
+                    e.Graphics.DrawRectangle(p, new Rectangle(e.Bounds.Left, e.Bounds.Top, e.Bounds.Width - 1, e.Bounds.Height - 1));
+            }
+        }
+
+        private void ListViewChamber_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+                return;
+
+            if (listViewChamber == null)
+                return;
+
+            var hit = listViewChamber.HitTest(e.Location);
+            if (hit == null || hit.Item == null || hit.SubItem == null)
+                return;
+
+            int subIndex = hit.Item.SubItems.IndexOf(hit.SubItem);
+
+            if (IsChamberEditableSetpointColumn(subIndex))
+            {
+                BeginChamberCellEdit(hit.Item, hit.SubItem, subIndex);
+                return;
+            }
+
+            if (!IsChamberControlColumn(subIndex))
+                return;
+
+            var cellBounds = hit.SubItem.Bounds;
+            var cbBounds = GetCheckboxBounds(cellBounds);
+            if (!cbBounds.Contains(e.Location))
+                return;
+
+            bool current = false;
+            TryParseBoolish(hit.SubItem.Text, out current);
+            bool next = !current;
+
+            var chamber = hit.Item.Tag as Chamber;
+            if (chamber == null)
+                return;
+
+            bool ok = false;
+            if (subIndex == _colIdxChamberTempControl)
+                ok = ChamberCommands.SetTempControl(chamber, next);
+            else if (subIndex == _colIdxChamberHumControl)
+                ok = ChamberCommands.SetRHControl(chamber, next);
+
+            if (ok)
+            {
+                hit.SubItem.Text = next ? "True" : "False";
+                listViewChamber.Invalidate(cellBounds);
+            }
+        }
+
+        private void ListViewChamber_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape && _chamberEditBox != null)
+            {
+                e.Handled = true;
+                EndChamberCellEdit(commit: false);
+            }
         }
 
         private void RefreshTimer_Tick(object sender, EventArgs e)
         {
             RefreshConnectedProbes();
             RefreshConnectedMirrors();
+            RefreshConnectedChambers();
         }
+
+        private void OnChambersRefreshed(EventArgs e)
+        {
+            try { ChambersRefreshed?.Invoke(this, e); } catch { }
+        }
+
+        private void RefreshConnectedChambers()
+        {
+            if (listViewChamber == null)
+                return;
+
+            try
+            {
+                WireChamberListViewControls();
+                EndChamberCellEdit(commit: true);
+                listViewChamber.BeginUpdate();
+
+                var chambers = Program.GetConnectedChambersSnapshot();
+
+                if (chambers == null)
+                {
+                    if (listViewChamber.Items.Count > 0 || listViewChamber.Columns.Count > 0)
+                    {
+                        listViewChamber.Items.Clear();
+                        listViewChamber.Columns.Clear();
+                        _lastChamberKeys = null;
+                        _lastChamberColumnNames = null;
+                        OnChambersRefreshed(EventArgs.Empty);
+                    }
+                    return;
+                }
+
+                var displayOptions = ChamberDisplayOptions.Load() ?? new ChamberDisplayOptions();
+                var visibleFields = displayOptions.GetVisibleOrdered().ToList();
+                if (visibleFields.Count == 0)
+                {
+                    if (listViewChamber.Items.Count > 0 || listViewChamber.Columns.Count > 0)
+                    {
+                        listViewChamber.Items.Clear();
+                        listViewChamber.Columns.Clear();
+                        _lastChamberKeys = null;
+                        _lastChamberColumnNames = null;
+                        OnChambersRefreshed(EventArgs.Empty);
+                    }
+                    return;
+                }
+
+                var currentColumnNames = visibleFields.Select(kv => kv.Key.ToString()).ToList();
+                var currentKeys = chambers.Select(c => (c?.IPAddress ?? string.Empty)).OrderBy(s => s).ToList();
+
+                bool columnsChanged = _lastChamberColumnNames == null || !_lastChamberColumnNames.SequenceEqual(currentColumnNames);
+                bool itemsChanged = _lastChamberKeys == null || !_lastChamberKeys.SequenceEqual(currentKeys);
+
+                if (!columnsChanged && !itemsChanged && listViewChamber.Items.Count > 0 && listViewChamber.Columns.Count > 0)
+                {
+                    UpdateChamberItemValuesInPlace(chambers, visibleFields);
+                    listViewChamber.EndUpdate();
+                    OnChambersRefreshed(EventArgs.Empty);
+                    return;
+                }
+
+                listViewChamber.Items.Clear();
+                listViewChamber.Columns.Clear();
+
+                listViewChamber.View = View.Details;
+                listViewChamber.FullRowSelect = true;
+
+                foreach (var kv in visibleFields)
+                {
+                    var field = kv.Key;
+                    var option = kv.Value;
+                    var headerText = option.HeaderText ?? field.ToString();
+
+                    var column = new ColumnHeader
+                    {
+                        Name = field.ToString(),
+                        Text = headerText,
+                        Width = (option != null && option.Width > 0) ? option.Width : 120,
+                        TextAlign = HorizontalAlignment.Left
+                    };
+
+                    listViewChamber.Columns.Add(column);
+                }
+
+                UpdateChamberControlColumnIndexes();
+
+                var elementType = typeof(Chamber);
+                var props = elementType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
+                var propCache = new Dictionary<object, PropertyInfo>();
+                foreach (var kv in visibleFields)
+                {
+                    var fieldName = kv.Key.ToString();
+                    var p = elementType.GetProperty(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+                    if (p == null)
+                    {
+                        string normalizedField = new string(fieldName.Where(c => c != '_' && c != ' ').ToArray());
+                        p = props.FirstOrDefault(c => string.Equals(new string(c.Name.Where(ch => ch != '_' && ch != ' ').ToArray()), normalizedField, StringComparison.OrdinalIgnoreCase));
+                    }
+                    propCache[kv.Key] = p;
+                }
+
+                foreach (var c in chambers)
+                {
+                    if (c == null)
+                        continue;
+
+                    var values = new List<string>(visibleFields.Count);
+                    foreach (var kv in visibleFields)
+                    {
+                        var prop = propCache[kv.Key];
+                        if (prop != null)
+                        {
+                            try { var v = prop.GetValue(c); values.Add(v?.ToString() ?? string.Empty); } catch { values.Add(string.Empty); }
+                        }
+                        else
+                        {
+                            values.Add(string.Empty);
+                        }
+                    }
+
+                    var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
+                    for (int i = 1; i < values.Count; i++)
+                        lvi.SubItems.Add(values[i]);
+
+                    lvi.Tag = c;
+                    lvi.ForeColor = c.InUse ? Color.Red : SystemColors.WindowText;
+                    listViewChamber.Items.Add(lvi);
+                }
+
+                const int MinColumnWidth = 40;
+                for (int i = 0; i < listViewChamber.Columns.Count; i++)
+                {
+                    var col = listViewChamber.Columns[i];
+                    if (col.Width < MinColumnWidth)
+                        col.Width = 120;
+                }
+
+                _lastChamberColumnNames = currentColumnNames;
+                _lastChamberKeys = currentKeys;
+                OnChambersRefreshed(EventArgs.Empty);
+            }
+            finally
+            {
+                listViewChamber.EndUpdate();
+            }
+        }
+
+        private void UpdateChamberItemValuesInPlace(List<Chamber> chambers, List<KeyValuePair<ChamberDisplayOptions.Field, ChamberDisplayOptions.ColumnOption>> visibleFields)
+        {
+            if (chambers == null || visibleFields == null) return;
+
+            var map = chambers
+                .Where(c => c != null)
+                .GroupBy(c => (c.IPAddress ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var elementType = typeof(Chamber);
+            var props = elementType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
+            var propCache = new Dictionary<object, PropertyInfo>();
+            foreach (var kv in visibleFields)
+            {
+                var fieldName = kv.Key.ToString();
+                var p = elementType.GetProperty(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+                if (p == null)
+                {
+                    string normalizedField = new string(fieldName.Where(c => c != '_' && c != ' ').ToArray());
+                    p = props.FirstOrDefault(c => string.Equals(new string(c.Name.Where(ch => ch != '_' && ch != ' ').ToArray()), normalizedField, StringComparison.OrdinalIgnoreCase));
+                }
+                propCache[kv.Key] = p;
+            }
+
+            for (int i = listViewChamber.Items.Count - 1; i >= 0; i--)
+            {
+                var item = listViewChamber.Items[i];
+                string ip = string.Empty;
+                Chamber underlying = null;
+                try { underlying = item.Tag as Chamber; } catch { underlying = null; }
+                if (underlying != null && !string.IsNullOrEmpty(underlying.IPAddress))
+                    ip = underlying.IPAddress;
+
+                if (string.IsNullOrEmpty(ip))
+                {
+                    for (int ci = 0; ci < listViewChamber.Columns.Count; ci++)
+                    {
+                        if (string.Equals(listViewChamber.Columns[ci].Name, "IPAddress", StringComparison.OrdinalIgnoreCase))
+                        {
+                            int subIndex = ci;
+                            if (subIndex >= 0 && subIndex < item.SubItems.Count)
+                                ip = item.SubItems[subIndex].Text;
+                            break;
+                        }
+                    }
+                }
+
+                Chamber cNew = null;
+                if (!string.IsNullOrEmpty(ip) && map.TryGetValue(ip, out cNew))
+                {
+                    for (int colIdx = 0; colIdx < visibleFields.Count; colIdx++)
+                    {
+                        var kv = visibleFields[colIdx];
+                        var prop = propCache[kv.Key];
+                        string txt = string.Empty;
+                        if (prop != null)
+                        {
+                            try { var v = prop.GetValue(cNew); txt = v?.ToString() ?? string.Empty; } catch { txt = string.Empty; }
+                        }
+
+                        if (colIdx < item.SubItems.Count)
+                            item.SubItems[colIdx].Text = txt;
+                        else
+                            item.SubItems.Add(txt);
+                    }
+
+                    item.Tag = cNew;
+                    item.ForeColor = cNew.InUse ? Color.Red : SystemColors.WindowText;
+                }
+                else
+                {
+                    // For fake chambers used in UX/UI testing, they may not appear in the monitored snapshot.
+                    // Keep them visible rather than removing the row.
+                    var existing = item.Tag as Chamber;
+                    if (existing != null && string.Equals(existing.Name ?? string.Empty, "Fake Chamber", StringComparison.OrdinalIgnoreCase))
+                    {
+                        item.ForeColor = existing.InUse ? Color.Red : SystemColors.WindowText;
+                    }
+                    else
+                    {
+                        listViewChamber.Items.RemoveAt(i);
+                    }
+                }
+            }
+
+            var existingIps = listViewChamber.Items.Cast<ListViewItem>().Select(it => (it.Tag as Chamber)?.IPAddress ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in chambers)
+            {
+                var ipKey = c?.IPAddress ?? string.Empty;
+                if (!existingIps.Contains(ipKey))
+                {
+                    var values = new List<string>(visibleFields.Count);
+                    foreach (var kv in visibleFields)
+                    {
+                        var prop = propCache[kv.Key];
+                        try { var v = prop?.GetValue(c); values.Add(v?.ToString() ?? string.Empty); } catch { values.Add(string.Empty); }
+                    }
+                    var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
+                    for (int i = 1; i < values.Count; i++) lvi.SubItems.Add(values[i]);
+                    lvi.Tag = c;
+                    lvi.ForeColor = c.InUse ? Color.Red : SystemColors.WindowText;
+                    listViewChamber.Items.Add(lvi);
+                }
+            }
+        }
+
+
 
         private void RefreshConnectedMirrors()
         {
@@ -137,6 +718,7 @@ namespace Rotronic
                     // Only values changed: update subitems in-place to avoid flicker and avoid raising event
                     UpdateMirrorItemValuesInPlace(mirrors, visibleFields);
                     listViewMirror.EndUpdate();
+                    OnMirrorsRefreshed(EventArgs.Empty);
                     return;
                 }
 
@@ -329,6 +911,8 @@ namespace Rotronic
                                 lvi.SubItems.Add(values[i]);
 
                             lvi.Tag = itemObj; // persist underlying object for stable identification
+                            if (itemObj is Mirror m)
+                                lvi.ForeColor = m.InUse ? Color.Red : SystemColors.WindowText;
                             listViewMirror.Items.Add(lvi);
                         }
                     }
@@ -429,6 +1013,7 @@ namespace Rotronic
                     }
 
                     item.Tag = mNew;
+                    item.ForeColor = mNew.InUse ? Color.Red : SystemColors.WindowText;
                 }
                 else
                 {
@@ -453,6 +1038,7 @@ namespace Rotronic
                     var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
                     for (int i = 1; i < values.Count; i++) lvi.SubItems.Add(values[i]);
                     lvi.Tag = m;
+                    lvi.ForeColor = m.InUse ? Color.Red : SystemColors.WindowText;
                     listViewMirror.Items.Add(lvi);
                 }
             }
@@ -511,6 +1097,7 @@ namespace Rotronic
                     // Only values changed: update subitems in-place and do not raise event
                     UpdateProbeItemValuesInPlace(probes, visibleFields);
                     listViewRotProbe.EndUpdate();
+                    OnProbesRefreshed(EventArgs.Empty);
                     return;
                 }
 
@@ -709,6 +1296,8 @@ namespace Rotronic
                                 lvi.SubItems.Add(values[i]);
 
                             lvi.Tag = itemObj; // persist underlying object for stable identification
+                            if (itemObj is RotProbe rp)
+                                lvi.ForeColor = rp.InUse ? Color.Red : SystemColors.WindowText;
                             listViewRotProbe.Items.Add(lvi);
                         }
                     }
@@ -805,11 +1394,20 @@ namespace Rotronic
                     }
 
                     item.Tag = pNew;
+                    item.ForeColor = pNew.InUse ? Color.Red : SystemColors.WindowText;
                 }
                 else
                 {
                     // probe removed -> remove item
-                    listViewRotProbe.Items.RemoveAt(i);
+                    // Keep fake probes used for UX/UI testing even if they don't appear in the latest snapshot.
+                    if (underlying != null && string.Equals(underlying.DeviceModel ?? string.Empty, "Fake", StringComparison.OrdinalIgnoreCase))
+                    {
+                        item.ForeColor = underlying.InUse ? Color.Red : SystemColors.WindowText;
+                    }
+                    else
+                    {
+                        listViewRotProbe.Items.RemoveAt(i);
+                    }
                 }
             }
 
@@ -829,6 +1427,7 @@ namespace Rotronic
                     var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
                     for (int i = 1; i < values.Count; i++) lvi.SubItems.Add(values[i]);
                     lvi.Tag = p;
+                    lvi.ForeColor = p.InUse ? Color.Red : SystemColors.WindowText;
                     listViewRotProbe.Items.Add(lvi);
                 }
             }
@@ -1088,6 +1687,12 @@ namespace Rotronic
         {
             var ipConfigFrm = new IPConfigFrm();
             ipConfigFrm.ShowDialog();
+        }
+
+        private void hygrogenDisplayOptionsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var ChamberOptions = new ChamberOptions();
+            ChamberOptions.ShowDialog();
         }
     }
 }

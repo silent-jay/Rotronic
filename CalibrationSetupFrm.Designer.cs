@@ -45,6 +45,9 @@
             this.chkSelectAllMirrors = new System.Windows.Forms.CheckBox();
             this.checkBoxManual = new System.Windows.Forms.CheckBox();
             this.buttonBegin = new System.Windows.Forms.Button();
+            this.checkBox1 = new System.Windows.Forms.CheckBox();
+            this.label3 = new System.Windows.Forms.Label();
+            this.listViewChamber = new System.Windows.Forms.ListView();
             this.SuspendLayout();
             // 
             // listViewRotProbe
@@ -73,14 +76,14 @@
             this.label1.AutoSize = true;
             this.label1.Location = new System.Drawing.Point(20, 32);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(83, 20);
+            this.label1.Size = new System.Drawing.Size(80, 20);
             this.label1.TabIndex = 2;
-            this.label1.Text = "Probe Info";
+            this.label1.Text = "Probe List";
             // 
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(20, 422);
+            this.label2.Location = new System.Drawing.Point(24, 425);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(104, 20);
             this.label2.TabIndex = 3;
@@ -111,7 +114,7 @@
             this.checkBoxManual.AutoSize = true;
             this.checkBoxManual.Checked = true;
             this.checkBoxManual.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.checkBoxManual.Location = new System.Drawing.Point(28, 726);
+            this.checkBoxManual.Location = new System.Drawing.Point(24, 1095);
             this.checkBoxManual.Name = "checkBoxManual";
             this.checkBoxManual.Size = new System.Drawing.Size(224, 24);
             this.checkBoxManual.TabIndex = 6;
@@ -121,7 +124,7 @@
             // buttonBegin
             // 
             this.buttonBegin.Font = new System.Drawing.Font("Microsoft Sans Serif", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.buttonBegin.Location = new System.Drawing.Point(593, 726);
+            this.buttonBegin.Location = new System.Drawing.Point(705, 1070);
             this.buttonBegin.Name = "buttonBegin";
             this.buttonBegin.Size = new System.Drawing.Size(690, 66);
             this.buttonBegin.TabIndex = 7;
@@ -129,11 +132,42 @@
             this.buttonBegin.UseVisualStyleBackColor = true;
             this.buttonBegin.Click += new System.EventHandler(this.buttonBegin_Click);
             // 
+            // checkBox1
+            // 
+            this.checkBox1.AutoSize = true;
+            this.checkBox1.Location = new System.Drawing.Point(28, 748);
+            this.checkBox1.Name = "checkBox1";
+            this.checkBox1.Size = new System.Drawing.Size(22, 21);
+            this.checkBox1.TabIndex = 10;
+            this.checkBox1.UseVisualStyleBackColor = true;
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(24, 725);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(103, 20);
+            this.label3.TabIndex = 9;
+            this.label3.Text = "Chamber List";
+            // 
+            // listViewChamber
+            // 
+            this.listViewChamber.HideSelection = false;
+            this.listViewChamber.Location = new System.Drawing.Point(24, 746);
+            this.listViewChamber.Name = "listViewChamber";
+            this.listViewChamber.Size = new System.Drawing.Size(1880, 240);
+            this.listViewChamber.TabIndex = 8;
+            this.listViewChamber.UseCompatibleStateImageBehavior = false;
+            this.listViewChamber.View = System.Windows.Forms.View.Details;
+            // 
             // CalibrationSetupFrm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(2040, 833);
+            this.ClientSize = new System.Drawing.Size(2098, 1157);
+            this.Controls.Add(this.checkBox1);
+            this.Controls.Add(this.label3);
+            this.Controls.Add(this.listViewChamber);
             this.Controls.Add(this.buttonBegin);
             this.Controls.Add(this.checkBoxManual);
             this.Controls.Add(this.chkSelectAllMirrors);
@@ -156,5 +190,8 @@
 
         private System.Windows.Forms.CheckBox checkBoxManual;
         private System.Windows.Forms.Button buttonBegin;
+        private System.Windows.Forms.CheckBox checkBox1;
+        private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.ListView listViewChamber;
     }
 }

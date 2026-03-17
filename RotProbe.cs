@@ -44,6 +44,8 @@ namespace Rotronic
         public char DeviceType { get; set; }
         public string ProbeAddress { get; set; }
         public bool CelsiusHelper { get; set; }
+        public bool InUse { get; set; }
+        public bool Selected { get; set; }
 
 
     }

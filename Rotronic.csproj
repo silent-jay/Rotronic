@@ -60,11 +60,11 @@
     <Compile Include="CalibrationSetupFrm.Designer.cs">
       <DependentUpon>CalibrationSetupFrm.cs</DependentUpon>
     </Compile>
-    <Compile Include="CalibrationStepFrm.cs">
+    <Compile Include="CalProgressFrm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="CalibrationStepFrm.Designer.cs">
-      <DependentUpon>CalibrationStepFrm.cs</DependentUpon>
+    <Compile Include="CalProgressFrm.Designer.cs">
+      <DependentUpon>CalProgressFrm.cs</DependentUpon>
     </Compile>
     <Compile Include="Chamber.cs" />
     <Compile Include="ChamberCommands.cs" />
@@ -118,12 +118,6 @@
     <Compile Include="StepEditor.Designer.cs">
       <DependentUpon>StepEditor.cs</DependentUpon>
     </Compile>
-    <Compile Include="CalProgressFrm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="CalProgressFrm.Designer.cs">
-      <DependentUpon>CalProgressFrm.cs</DependentUpon>
-    </Compile>
     <Compile Include="TempAdjProgressFrm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -144,9 +138,6 @@
     </Compile>
     <EmbeddedResource Include="CalibrationSetupFrm.resx">
       <DependentUpon>CalibrationSetupFrm.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="CalibrationStepFrm.resx">
-      <DependentUpon>CalibrationStepFrm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="ChamberOptions.resx">
       <DependentUpon>ChamberOptions.cs</DependentUpon>
@@ -177,9 +168,6 @@
     </EmbeddedResource>
     <EmbeddedResource Include="StepEditor.resx">
       <DependentUpon>StepEditor.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="CalProgressFrm.resx">
-      <DependentUpon>CalProgressFrm.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="TempAdjProgressFrm.resx">
       <DependentUpon>TempAdjProgressFrm.cs</DependentUpon>

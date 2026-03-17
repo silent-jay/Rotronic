@@ -28,14 +28,14 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle10 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle11 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle12 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle1 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle2 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle3 = new System.Windows.Forms.DataGridViewCellStyle();
             this.menuStrip1 = new System.Windows.Forms.MenuStrip();
             this.newStepListToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.newListToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.saveToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.loadListToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.saveToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.label5 = new System.Windows.Forms.Label();
             this.label4 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
@@ -45,14 +45,14 @@
             this.dataGridViewStep = new System.Windows.Forms.DataGridView();
             this.label6 = new System.Windows.Forms.Label();
             this.label7 = new System.Windows.Forms.Label();
-            this.Step = new System.Windows.Forms.DataGridViewComboBoxColumn();
-            this.SetPointRH = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.ColumnTemp = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.SoakTime = new System.Windows.Forms.DataGridViewComboBoxColumn();
-            this.ColumnAccuracy = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.ColumnAdjust = new System.Windows.Forms.DataGridViewCheckBoxColumn();
             this.label8 = new System.Windows.Forms.Label();
             this.checkBoxAdvTemp = new System.Windows.Forms.CheckBox();
+            this.Step = new System.Windows.Forms.DataGridViewComboBoxColumn();
+            this.SetPointRH = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.SetPointTemp = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.SoakTime = new System.Windows.Forms.DataGridViewComboBoxColumn();
+            this.Accuracy = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.Adjust = new System.Windows.Forms.DataGridViewCheckBoxColumn();
             this.menuStrip1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dataGridViewStep)).BeginInit();
             this.SuspendLayout();
@@ -86,19 +86,19 @@
             this.newListToolStripMenuItem.Text = "New List";
             this.newListToolStripMenuItem.Click += new System.EventHandler(this.newListToolStripMenuItem_Click);
             // 
-            // saveToolStripMenuItem
-            // 
-            this.saveToolStripMenuItem.Name = "saveToolStripMenuItem";
-            this.saveToolStripMenuItem.Size = new System.Drawing.Size(184, 34);
-            this.saveToolStripMenuItem.Text = "Save";
-            this.saveToolStripMenuItem.Click += new System.EventHandler(this.saveToolStripMenuItem_Click);
-            // 
             // loadListToolStripMenuItem
             // 
             this.loadListToolStripMenuItem.Name = "loadListToolStripMenuItem";
             this.loadListToolStripMenuItem.Size = new System.Drawing.Size(184, 34);
             this.loadListToolStripMenuItem.Text = "Load List";
             this.loadListToolStripMenuItem.Click += new System.EventHandler(this.loadListToolStripMenuItem_Click);
+            // 
+            // saveToolStripMenuItem
+            // 
+            this.saveToolStripMenuItem.Name = "saveToolStripMenuItem";
+            this.saveToolStripMenuItem.Size = new System.Drawing.Size(184, 34);
+            this.saveToolStripMenuItem.Text = "Save";
+            this.saveToolStripMenuItem.Click += new System.EventHandler(this.saveToolStripMenuItem_Click);
             // 
             // label5
             // 
@@ -160,40 +160,40 @@
             // 
             // dataGridViewStep
             // 
-            dataGridViewCellStyle10.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
-            dataGridViewCellStyle10.BackColor = System.Drawing.SystemColors.Control;
-            dataGridViewCellStyle10.Font = new System.Drawing.Font("Microsoft Sans Serif", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            dataGridViewCellStyle10.ForeColor = System.Drawing.SystemColors.WindowText;
-            dataGridViewCellStyle10.SelectionBackColor = System.Drawing.SystemColors.Highlight;
-            dataGridViewCellStyle10.SelectionForeColor = System.Drawing.SystemColors.HighlightText;
-            dataGridViewCellStyle10.WrapMode = System.Windows.Forms.DataGridViewTriState.True;
-            this.dataGridViewStep.ColumnHeadersDefaultCellStyle = dataGridViewCellStyle10;
+            dataGridViewCellStyle1.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
+            dataGridViewCellStyle1.BackColor = System.Drawing.SystemColors.Control;
+            dataGridViewCellStyle1.Font = new System.Drawing.Font("Microsoft Sans Serif", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            dataGridViewCellStyle1.ForeColor = System.Drawing.SystemColors.WindowText;
+            dataGridViewCellStyle1.SelectionBackColor = System.Drawing.SystemColors.Highlight;
+            dataGridViewCellStyle1.SelectionForeColor = System.Drawing.SystemColors.HighlightText;
+            dataGridViewCellStyle1.WrapMode = System.Windows.Forms.DataGridViewTriState.True;
+            this.dataGridViewStep.ColumnHeadersDefaultCellStyle = dataGridViewCellStyle1;
             this.dataGridViewStep.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dataGridViewStep.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
             this.Step,
             this.SetPointRH,
-            this.ColumnTemp,
+            this.SetPointTemp,
             this.SoakTime,
-            this.ColumnAccuracy,
-            this.ColumnAdjust});
-            dataGridViewCellStyle11.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
-            dataGridViewCellStyle11.BackColor = System.Drawing.SystemColors.Window;
-            dataGridViewCellStyle11.Font = new System.Drawing.Font("Microsoft Sans Serif", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            dataGridViewCellStyle11.ForeColor = System.Drawing.SystemColors.ControlText;
-            dataGridViewCellStyle11.SelectionBackColor = System.Drawing.SystemColors.Highlight;
-            dataGridViewCellStyle11.SelectionForeColor = System.Drawing.SystemColors.HighlightText;
-            dataGridViewCellStyle11.WrapMode = System.Windows.Forms.DataGridViewTriState.False;
-            this.dataGridViewStep.DefaultCellStyle = dataGridViewCellStyle11;
+            this.Accuracy,
+            this.Adjust});
+            dataGridViewCellStyle2.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
+            dataGridViewCellStyle2.BackColor = System.Drawing.SystemColors.Window;
+            dataGridViewCellStyle2.Font = new System.Drawing.Font("Microsoft Sans Serif", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            dataGridViewCellStyle2.ForeColor = System.Drawing.SystemColors.ControlText;
+            dataGridViewCellStyle2.SelectionBackColor = System.Drawing.SystemColors.Highlight;
+            dataGridViewCellStyle2.SelectionForeColor = System.Drawing.SystemColors.HighlightText;
+            dataGridViewCellStyle2.WrapMode = System.Windows.Forms.DataGridViewTriState.False;
+            this.dataGridViewStep.DefaultCellStyle = dataGridViewCellStyle2;
             this.dataGridViewStep.Location = new System.Drawing.Point(229, 347);
             this.dataGridViewStep.Name = "dataGridViewStep";
-            dataGridViewCellStyle12.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
-            dataGridViewCellStyle12.BackColor = System.Drawing.SystemColors.Control;
-            dataGridViewCellStyle12.Font = new System.Drawing.Font("Microsoft Sans Serif", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            dataGridViewCellStyle12.ForeColor = System.Drawing.SystemColors.WindowText;
-            dataGridViewCellStyle12.SelectionBackColor = System.Drawing.SystemColors.Highlight;
-            dataGridViewCellStyle12.SelectionForeColor = System.Drawing.SystemColors.HighlightText;
-            dataGridViewCellStyle12.WrapMode = System.Windows.Forms.DataGridViewTriState.True;
-            this.dataGridViewStep.RowHeadersDefaultCellStyle = dataGridViewCellStyle12;
+            dataGridViewCellStyle3.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
+            dataGridViewCellStyle3.BackColor = System.Drawing.SystemColors.Control;
+            dataGridViewCellStyle3.Font = new System.Drawing.Font("Microsoft Sans Serif", 8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            dataGridViewCellStyle3.ForeColor = System.Drawing.SystemColors.WindowText;
+            dataGridViewCellStyle3.SelectionBackColor = System.Drawing.SystemColors.Highlight;
+            dataGridViewCellStyle3.SelectionForeColor = System.Drawing.SystemColors.HighlightText;
+            dataGridViewCellStyle3.WrapMode = System.Windows.Forms.DataGridViewTriState.True;
+            this.dataGridViewStep.RowHeadersDefaultCellStyle = dataGridViewCellStyle3;
             this.dataGridViewStep.RowHeadersWidth = 62;
             this.dataGridViewStep.RowTemplate.Height = 28;
             this.dataGridViewStep.Size = new System.Drawing.Size(1559, 335);
@@ -219,61 +219,6 @@
             this.label7.Text = "Best practice is to adjust temperature first before adjusting humidity, and to co" +
     "llect as-found data before performing any adjustment";
             // 
-            // Step
-            // 
-            this.Step.HeaderText = "Step";
-            this.Step.Items.AddRange(new object[] {
-            "Humidity",
-            "Temperature",
-            "Adjust"});
-            this.Step.MinimumWidth = 8;
-            this.Step.Name = "Step";
-            this.Step.Width = 250;
-            // 
-            // SetPointRH
-            // 
-            this.SetPointRH.HeaderText = "Humidity Set Point(%rh)";
-            this.SetPointRH.MinimumWidth = 8;
-            this.SetPointRH.Name = "SetPointRH";
-            this.SetPointRH.Width = 150;
-            // 
-            // ColumnTemp
-            // 
-            this.ColumnTemp.HeaderText = "Temperature Set Point (°C)";
-            this.ColumnTemp.MinimumWidth = 8;
-            this.ColumnTemp.Name = "ColumnTemp";
-            this.ColumnTemp.Width = 150;
-            // 
-            // SoakTime
-            // 
-            this.SoakTime.HeaderText = "Soak Time";
-            this.SoakTime.Items.AddRange(new object[] {
-            "00:15",
-            "00:30",
-            "00:45",
-            "01:00",
-            "01:15",
-            "01:30",
-            "01:45",
-            "02:00"});
-            this.SoakTime.MinimumWidth = 8;
-            this.SoakTime.Name = "SoakTime";
-            this.SoakTime.Width = 150;
-            // 
-            // ColumnAccuracy
-            // 
-            this.ColumnAccuracy.HeaderText = "Accuracy Specification";
-            this.ColumnAccuracy.MinimumWidth = 8;
-            this.ColumnAccuracy.Name = "ColumnAccuracy";
-            this.ColumnAccuracy.Width = 150;
-            // 
-            // ColumnAdjust
-            // 
-            this.ColumnAdjust.HeaderText = "Adjustment Point?";
-            this.ColumnAdjust.MinimumWidth = 8;
-            this.ColumnAdjust.Name = "ColumnAdjust";
-            this.ColumnAdjust.Width = 150;
-            // 
             // label8
             // 
             this.label8.AutoSize = true;
@@ -294,6 +239,61 @@
             this.checkBoxAdvTemp.TabIndex = 28;
             this.checkBoxAdvTemp.Text = "Advanced Temperature Adjustment";
             this.checkBoxAdvTemp.UseVisualStyleBackColor = true;
+            // 
+            // Step
+            // 
+            this.Step.HeaderText = "Step";
+            this.Step.Items.AddRange(new object[] {
+            "Humidity",
+            "Temperature",
+            "Adjust"});
+            this.Step.MinimumWidth = 8;
+            this.Step.Name = "Step";
+            this.Step.Width = 250;
+            // 
+            // SetPointRH
+            // 
+            this.SetPointRH.HeaderText = "Humidity Set Point(%rh)";
+            this.SetPointRH.MinimumWidth = 8;
+            this.SetPointRH.Name = "SetPointRH";
+            this.SetPointRH.Width = 150;
+            // 
+            // SetPointTemp
+            // 
+            this.SetPointTemp.HeaderText = "Temperature Set Point (°C)";
+            this.SetPointTemp.MinimumWidth = 8;
+            this.SetPointTemp.Name = "SetPointTemp";
+            this.SetPointTemp.Width = 150;
+            // 
+            // SoakTime
+            // 
+            this.SoakTime.HeaderText = "Soak Time";
+            this.SoakTime.Items.AddRange(new object[] {
+            "00:15",
+            "00:30",
+            "00:45",
+            "01:00",
+            "01:15",
+            "01:30",
+            "01:45",
+            "02:00"});
+            this.SoakTime.MinimumWidth = 8;
+            this.SoakTime.Name = "SoakTime";
+            this.SoakTime.Width = 150;
+            // 
+            // Accuracy
+            // 
+            this.Accuracy.HeaderText = "Accuracy Specification";
+            this.Accuracy.MinimumWidth = 8;
+            this.Accuracy.Name = "Accuracy";
+            this.Accuracy.Width = 150;
+            // 
+            // Adjust
+            // 
+            this.Adjust.HeaderText = "Adjustment Point?";
+            this.Adjust.MinimumWidth = 8;
+            this.Adjust.Name = "Adjust";
+            this.Adjust.Width = 150;
             // 
             // StepEditor
             // 
@@ -338,13 +338,13 @@
         private System.Windows.Forms.DataGridView dataGridViewStep;
         private System.Windows.Forms.Label label6;
         private System.Windows.Forms.Label label7;
-        private System.Windows.Forms.DataGridViewComboBoxColumn Step;
-        private System.Windows.Forms.DataGridViewTextBoxColumn SetPointRH;
-        private System.Windows.Forms.DataGridViewTextBoxColumn ColumnTemp;
-        private System.Windows.Forms.DataGridViewComboBoxColumn SoakTime;
-        private System.Windows.Forms.DataGridViewTextBoxColumn ColumnAccuracy;
-        private System.Windows.Forms.DataGridViewCheckBoxColumn ColumnAdjust;
         private System.Windows.Forms.Label label8;
         private System.Windows.Forms.CheckBox checkBoxAdvTemp;
+        private System.Windows.Forms.DataGridViewComboBoxColumn Step;
+        private System.Windows.Forms.DataGridViewTextBoxColumn SetPointRH;
+        private System.Windows.Forms.DataGridViewTextBoxColumn SetPointTemp;
+        private System.Windows.Forms.DataGridViewComboBoxColumn SoakTime;
+        private System.Windows.Forms.DataGridViewTextBoxColumn Accuracy;
+        private System.Windows.Forms.DataGridViewCheckBoxColumn Adjust;
     }
 }

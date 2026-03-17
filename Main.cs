@@ -1485,14 +1485,6 @@ namespace Rotronic
             stepListForm.Show(this);
         }
 
-        private void loadCalibrationToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-
-            var stepListForm = new CalibrationStepFrm();
-
-            stepListForm.Show(this);
-        }
-
         private void temperatureAdjToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var tempAdjForm = new TempAdjustSetupFrm();

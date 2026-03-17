@@ -8,15 +8,11 @@ namespace Rotronic
 {
     public class StepClass
     {
-        public string Steps { get; set; }
-        public double HumiditySetPoint { get; set; }
-        public double TemperatureSetPoint { get; set; }
+        public string Step { get; set; }
+        public double SetPointRH { get; set; }
+        public double SetPointTemp { get; set; }
         public string SoakTime { get; set; }
-        public bool EvalTemp {  get; set; }
-        public double MinTemperature { get; set; }
-        public double MaxTemperature { get; set; }
-        public bool EvalHumidity { get; set; }
-        public double MinHumidity { get; set; }
-        public double MaxHumidity { get; set ; }
+        public double Accuracy { get; set; }
+        public bool Adjust { get; set; }
     }
 }

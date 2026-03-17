@@ -12,10 +12,6 @@
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Label label2;
 
-        // New select-all checkboxes for the header column
-        private System.Windows.Forms.CheckBox chkSelectAllProbes;
-        private System.Windows.Forms.CheckBox chkSelectAllMirrors;
-
         /// <summary>
         /// Clean up any resources being used.
         /// </summary>
@@ -41,11 +37,8 @@
             this.listViewMirror = new System.Windows.Forms.ListView();
             this.label1 = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
-            this.chkSelectAllProbes = new System.Windows.Forms.CheckBox();
-            this.chkSelectAllMirrors = new System.Windows.Forms.CheckBox();
             this.checkBoxManual = new System.Windows.Forms.CheckBox();
             this.buttonBegin = new System.Windows.Forms.Button();
-            this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.label3 = new System.Windows.Forms.Label();
             this.listViewChamber = new System.Windows.Forms.ListView();
             this.SuspendLayout();
@@ -89,26 +82,6 @@
             this.label2.TabIndex = 3;
             this.label2.Text = "Standard List";
             // 
-            // chkSelectAllProbes
-            // 
-            this.chkSelectAllProbes.AutoSize = true;
-            this.chkSelectAllProbes.Location = new System.Drawing.Point(28, 58);
-            this.chkSelectAllProbes.Name = "chkSelectAllProbes";
-            this.chkSelectAllProbes.Size = new System.Drawing.Size(22, 21);
-            this.chkSelectAllProbes.TabIndex = 4;
-            this.chkSelectAllProbes.UseVisualStyleBackColor = true;
-            this.chkSelectAllProbes.CheckedChanged += new System.EventHandler(this.chkSelectAllProbes_CheckedChanged);
-            // 
-            // chkSelectAllMirrors
-            // 
-            this.chkSelectAllMirrors.AutoSize = true;
-            this.chkSelectAllMirrors.Location = new System.Drawing.Point(28, 448);
-            this.chkSelectAllMirrors.Name = "chkSelectAllMirrors";
-            this.chkSelectAllMirrors.Size = new System.Drawing.Size(22, 21);
-            this.chkSelectAllMirrors.TabIndex = 5;
-            this.chkSelectAllMirrors.UseVisualStyleBackColor = true;
-            this.chkSelectAllMirrors.CheckedChanged += new System.EventHandler(this.chkSelectAllMirrors_CheckedChanged);
-            // 
             // checkBoxManual
             // 
             this.checkBoxManual.AutoSize = true;
@@ -131,15 +104,6 @@
             this.buttonBegin.Text = "Begin Calibration!";
             this.buttonBegin.UseVisualStyleBackColor = true;
             this.buttonBegin.Click += new System.EventHandler(this.buttonBegin_Click);
-            // 
-            // checkBox1
-            // 
-            this.checkBox1.AutoSize = true;
-            this.checkBox1.Location = new System.Drawing.Point(28, 748);
-            this.checkBox1.Name = "checkBox1";
-            this.checkBox1.Size = new System.Drawing.Size(22, 21);
-            this.checkBox1.TabIndex = 10;
-            this.checkBox1.UseVisualStyleBackColor = true;
             // 
             // label3
             // 
@@ -165,13 +129,10 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(2098, 1157);
-            this.Controls.Add(this.checkBox1);
             this.Controls.Add(this.label3);
             this.Controls.Add(this.listViewChamber);
             this.Controls.Add(this.buttonBegin);
             this.Controls.Add(this.checkBoxManual);
-            this.Controls.Add(this.chkSelectAllMirrors);
-            this.Controls.Add(this.chkSelectAllProbes);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.listViewMirror);
@@ -190,7 +151,6 @@
 
         private System.Windows.Forms.CheckBox checkBoxManual;
         private System.Windows.Forms.Button buttonBegin;
-        private System.Windows.Forms.CheckBox checkBox1;
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.ListView listViewChamber;
     }

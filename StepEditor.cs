@@ -1512,20 +1512,29 @@ namespace Rotronic
                 return -1;
             }
 
-            // Identify columns (best-effort)
-            int colStep = FindColumnIndexContaining("step");
-            int colTempSet = FindColumnIndexContaining("temp", "set");
-            int colHumSet = FindColumnIndexContaining("hum", "set");
-            int colSoak = FindColumnIndexContaining("soak", "time");
-            int colEvalTemp = FindColumnIndexContaining("eval", "temp");
-            if (colEvalTemp < 0) colEvalTemp = FindColumnIndexContaining("evaluate", "temp");
-            int colEvalHum = FindColumnIndexContaining("eval", "hum");
-            if (colEvalHum < 0) colEvalHum = FindColumnIndexContaining("evaluate", "hum");
+            // Columns: Step, Humidity Set Point, Temperature Set Point, Soak Time, Accuracy Specification, Adjustment Point
+            int colStep = FindColumnIndexContaining(nameof(StepClass.Step));
+            if (colStep < 0) colStep = FindColumnIndexContaining("step");
 
-            int colTempAccuracy = FindTemperatureAccuracyColumnIndex();
-            int colHumAccuracy = FindHumidityAccuracyColumnIndex();
+            int colSetPointRH = FindColumnIndexContaining(nameof(StepClass.SetPointRH));
+            if (colSetPointRH < 0) colSetPointRH = FindColumnIndexContaining("humidity", "set");
+            if (colSetPointRH < 0) colSetPointRH = FindColumnIndexContaining("hum", "set");
+            if (colSetPointRH < 0) colSetPointRH = FindColumnIndexContaining("rh", "set");
 
-            // Local helpers for parsing
+            int colSetPointTemp = FindColumnIndexContaining(nameof(StepClass.SetPointTemp));
+            if (colSetPointTemp < 0) colSetPointTemp = FindColumnIndexContaining("temperature", "set");
+            if (colSetPointTemp < 0) colSetPointTemp = FindColumnIndexContaining("temp", "set");
+
+            int colSoakTime = FindColumnIndexContaining(nameof(StepClass.SoakTime));
+            if (colSoakTime < 0) colSoakTime = FindColumnIndexContaining("soak", "time");
+
+            int colAccuracy = FindColumnIndexContaining(nameof(StepClass.Accuracy));
+            if (colAccuracy < 0) colAccuracy = FindColumnIndexContaining("accuracy", "spec");
+            if (colAccuracy < 0) colAccuracy = FindColumnIndexContaining("accuracy");
+
+            int colAdjust = FindColumnIndexContaining(nameof(StepClass.Adjust));
+            if (colAdjust < 0) colAdjust = FindColumnIndexContaining("adjust", "point");
+
             string GetCellText(DataGridViewRow row, int colIndex)
             {
                 if (colIndex < 0 || colIndex >= dataGridViewStep.Columns.Count)
@@ -1552,49 +1561,15 @@ namespace Rotronic
                 if (row == null || row.IsNewRow)
                     continue;
 
-                var step = new StepClass();
-
-                // Steps (string)
-                if (colStep >= 0)
-                    step.Steps = GetCellText(row, colStep);
-                else
-                    step.Steps = string.Empty;
-
-                // Setpoints
-                if (colHumSet >= 0)
-                    step.HumiditySetPoint = ParseDoubleOrNaN(GetCellText(row, colHumSet));
-                else
-                    step.HumiditySetPoint = double.NaN;
-
-                if (colTempSet >= 0)
-                    step.TemperatureSetPoint = ParseDoubleOrNaN(GetCellText(row, colTempSet));
-                else
-                    step.TemperatureSetPoint = double.NaN;
-
-                // Soak time (string)
-                if (colSoak >= 0)
-                    step.SoakTime = GetCellText(row, colSoak);
-                else
-                    step.SoakTime = string.Empty;
-
-                // Evaluate flags
-                if (colEvalTemp >= 0)
-                    step.EvalTemp = GetCellBoolValue(row.Index, colEvalTemp);
-                else
-                    step.EvalTemp = false;
-
-                if (colEvalHum >= 0)
-                    step.EvalHumidity = GetCellBoolValue(row.Index, colEvalHum);
-                else
-                    step.EvalHumidity = false;
-
-                // Accuracy values: map into StepClass numeric slots (MinTemperature/MinHumidity)
-                // Min/Max were removed; use Min* fields to carry the single accuracy value, Max* set to NaN.
-                step.MinTemperature = (colTempAccuracy >= 0) ? ParseDoubleOrNaN(GetCellText(row, colTempAccuracy)) : double.NaN;
-                step.MaxTemperature = double.NaN;
-
-                step.MinHumidity = (colHumAccuracy >= 0) ? ParseDoubleOrNaN(GetCellText(row, colHumAccuracy)) : double.NaN;
-                step.MaxHumidity = double.NaN;
+                var step = new StepClass
+                {
+                    Step = (colStep >= 0) ? GetCellText(row, colStep) : string.Empty,
+                    SetPointRH = (colSetPointRH >= 0) ? ParseDoubleOrNaN(GetCellText(row, colSetPointRH)) : double.NaN,
+                    SetPointTemp = (colSetPointTemp >= 0) ? ParseDoubleOrNaN(GetCellText(row, colSetPointTemp)) : double.NaN,
+                    SoakTime = (colSoakTime >= 0) ? GetCellText(row, colSoakTime) : string.Empty,
+                    Accuracy = (colAccuracy >= 0) ? ParseDoubleOrNaN(GetCellText(row, colAccuracy)) : double.NaN,
+                  Adjust = (colAdjust >= 0) ? GetCellBoolValue(row.Index, colAdjust) : false
+                };
 
                 result.Add(step);
             }
@@ -1616,11 +1591,11 @@ namespace Rotronic
                 MessageBox.Show(this, "No step file is loaded", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-
+            var advancedTemp = checkBoxAdvTemp.Checked;
 
             // Build list of StepClass objects from the grid and pass to CalibrationSetupFrm
             var steps = BuildStepListFromGrid();
-            var calForm = new CalibrationSetupFrm(steps);
+            var calForm = new CalibrationSetupFrm(steps, advancedTemp);
             calForm.Show(this);
         }
     }

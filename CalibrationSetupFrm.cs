@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using System.Diagnostics;
+using System.Drawing.Text;
 
 namespace Rotronic
 {
@@ -21,21 +22,25 @@ namespace Rotronic
         // Store steps passed from StepEditor
         private List<StepClass> _steps = new List<StepClass>();
 
+        private bool _advanceTemp = false;
+
         public CalibrationSetupFrm()
         {
             InitializeComponent();
         }
 
         // New constructor to accept steps
-        public CalibrationSetupFrm(List<StepClass> steps) : this()
+        public CalibrationSetupFrm(List<StepClass> steps, bool advanceTemp) : this()
         {
             _steps = steps ?? new List<StepClass>();
+            _advanceTemp = advanceTemp;
             // Optionally reflect step count in the form title
             try
             {
                 this.Text = $"Calibration Setup ({_steps.Count} steps)";
             }
             catch { /* ignore UI errors */ }
+            
         }
 
         // Expose read-only access if other code needs the steps
@@ -73,9 +78,6 @@ namespace Rotronic
                 CopyProbesFromMain(_main);
                 CopyMirrorsFromMain(_main);
                 CopyChambersFromMain(_main);
-
-                // Make sure select-all checkboxes are placed correctly
-                PositionSelectAllCheckboxes();
             }
         }
 
@@ -92,7 +94,7 @@ namespace Rotronic
 
         private void CalibrationSetupFrm_Resize(object sender, EventArgs e)
         {
-            PositionSelectAllCheckboxes();
+            // Select-all header checkboxes were removed from the UI.
         }
 
         private void Main_ProbesRefreshed(object sender, EventArgs e)
@@ -529,8 +531,6 @@ namespace Rotronic
                         listViewRotProbe.Items.Remove(it);
                     }
 
-                    UpdateSelectAllCheckboxState(chkSelectAllProbes, listViewRotProbe);
-
                     return;
                 }
 
@@ -579,14 +579,10 @@ namespace Rotronic
                     }
                     listViewRotProbe.Items.Add(lvi);
                 }
-
-                UpdateSelectAllCheckboxState(chkSelectAllProbes, listViewRotProbe);
             }
             finally
             {
                 listViewRotProbe.EndUpdate();
-                // Ensure header checkbox positioned after columns are created
-                PositionSelectAllCheckboxes();
             }
         }
 
@@ -692,7 +688,6 @@ namespace Rotronic
                     foreach (var it in toRemove)
                         listViewMirror.Items.Remove(it);
 
-                    UpdateSelectAllCheckboxState(chkSelectAllMirrors, listViewMirror);
                     return;
                 }
 
@@ -735,13 +730,10 @@ namespace Rotronic
                     }
                     listViewMirror.Items.Add(lvi);
                 }
-
-                UpdateSelectAllCheckboxState(chkSelectAllMirrors, listViewMirror);
             }
             finally
             {
                 listViewMirror.EndUpdate();
-                PositionSelectAllCheckboxes();
             }
         }
 
@@ -752,8 +744,6 @@ namespace Rotronic
 
             if (e.Item.Tag is RotProbe rp)
                 rp.Selected = e.Item.Checked;
-
-            UpdateSelectAllCheckboxState(chkSelectAllProbes, listViewRotProbe);
         }
 
         // Called when individual mirror item is (un)checked by the user
@@ -781,99 +771,10 @@ namespace Rotronic
 
             if (e.Item.Tag is Mirror m)
                 m.Selected = e.Item.Checked;
-
-            UpdateSelectAllCheckboxState(chkSelectAllMirrors, listViewMirror);
-        }
-
-        private void chkSelectAllProbes_CheckedChanged(object sender, EventArgs e)
-        {
-            if (_suspendSelectAllHandler) return;
-            if (chkSelectAllProbes.CheckState == CheckState.Indeterminate) return;
-
-            bool check = chkSelectAllProbes.Checked;
-            _suspendItemCheckedHandler = true;
-            try
-            {
-                foreach (ListViewItem item in listViewRotProbe.Items)
-                {
-                    item.Checked = check;
-                    if (item.Tag is RotProbe rp)
-                        rp.Selected = check;
-                }
-            }
-            finally
-            {
-                _suspendItemCheckedHandler = false;
-            }
-        }
-
-        private void chkSelectAllMirrors_CheckedChanged(object sender, EventArgs e)
-        {
-            if (_suspendSelectAllHandler) return;
-            if (chkSelectAllMirrors.CheckState == CheckState.Indeterminate) return;
-
-            bool check = chkSelectAllMirrors.Checked;
-            _suspendItemCheckedHandler = true;
-            try
-            {
-                foreach (ListViewItem item in listViewMirror.Items)
-                {
-                    // mirrors are single-select; select-all only supports clearing
-                    if (check)
-                    {
-                        item.Checked = false;
-                        if (item.Tag is Mirror mSet)
-                            mSet.Selected = false;
-                    }
-                    else
-                    {
-                        item.Checked = false;
-                        if (item.Tag is Mirror mClear)
-                            mClear.Selected = false;
-                    }
-                }
-            }
-            finally
-            {
-                _suspendItemCheckedHandler = false;
-            }
-        }
-
-        // Keep header checkbox visually aligned with the first column; reposition when columns change or form resizes
-        private void PositionSelectAllCheckboxes()
-        {
-            PositionSelectAllCheckbox(listViewRotProbe, chkSelectAllProbes);
-            PositionSelectAllCheckbox(listViewMirror, chkSelectAllMirrors);
-        }
-
-        private void PositionSelectAllCheckbox(ListView lv, CheckBox chk)
-        {
-            if (lv == null || chk == null) return;
-
-            // Put the checkbox roughly over the first header cell.
-            // We position it relative to the listview's client area, with a small padding.
-            var lvScreen = lv.PointToScreen(Point.Empty);
-            var formClient = this.PointToClient(lvScreen);
-
-            // X: left of listView + small offset
-            int x = formClient.X +6;
-            // Y: top of listView + small offset to align with header row
-            int y = formClient.Y +6;
-
-            // Ensure checkbox stays within form bounds
-            if (x <0) x =2;
-            if (y <0) y =2;
-
-            chk.Location = new Point(x, y);
-            // Make sure it's visible and ThreeState so we can show Indeterminate when some checked
-            chk.Visible = true;
-            chk.ThreeState = true;
         }
 
         private void ListViewRotProbe_ColumnWidthChanged(object sender, ColumnWidthChangedEventArgs e)
         {
-            PositionSelectAllCheckbox(listViewRotProbe, chkSelectAllProbes);
-
             // Persist widths to header options so main refresh does not overwrite user resized widths
             try
             {
@@ -905,8 +806,6 @@ namespace Rotronic
 
         private void ListViewMirror_ColumnWidthChanged(object sender, ColumnWidthChangedEventArgs e)
         {
-            PositionSelectAllCheckbox(listViewMirror, chkSelectAllMirrors);
-
             // Persist widths to mirror display options so main refresh does not overwrite user resized widths
             try
             {
@@ -929,35 +828,6 @@ namespace Rotronic
             catch
             {
                 // ignore persistence failures
-            }
-        }
-
-        // Set select-all checkbox state based on current items: Checked if all checked, Unchecked if none, Indeterminate otherwise
-        private void UpdateSelectAllCheckboxState(CheckBox chk, ListView lv)
-        {
-            if (chk == null || lv == null) return;
-
-            _suspendSelectAllHandler = true;
-            try
-            {
-                int total = lv.Items.Count;
-                if (total ==0)
-                {
-                    chk.CheckState = CheckState.Unchecked;
-                    return;
-                }
-
-                int checkedCount = lv.Items.Cast<ListViewItem>().Count(i => i.Checked);
-                if (checkedCount ==0)
-                    chk.CheckState = CheckState.Unchecked;
-                else if (checkedCount == total)
-                    chk.CheckState = CheckState.Checked;
-                else
-                    chk.CheckState = CheckState.Indeterminate;
-            }
-            finally
-            {
-                _suspendSelectAllHandler = false;
             }
         }
 
@@ -1080,7 +950,7 @@ namespace Rotronic
             if (chamberObj != null)
                 chamberObj.InUse = true;
 
-            var calibrationProcess = new CalProgressFrm(selectedProbes, selectedMirror, _steps, checkBoxManual.Checked);
+            var calibrationProcess = new CalProgressFrm(selectedProbes, selectedMirror, selectedChamber, _steps, checkBoxManual.Checked, _advanceTemp);
             calibrationProcess.FormClosed += (s, args) =>
             {
                 foreach (var item in selectedProbes)

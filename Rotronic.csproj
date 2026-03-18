@@ -145,6 +145,9 @@
     <EmbeddedResource Include="CalibrationSetupFrm.resx">
       <DependentUpon>CalibrationSetupFrm.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="CalProgressFrm.resx">
+      <DependentUpon>CalProgressFrm.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="ChamberControllerFrm.resx">
       <DependentUpon>ChamberControllerFrm.cs</DependentUpon>
     </EmbeddedResource>

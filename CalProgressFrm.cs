@@ -10,6 +10,8 @@ using System.Windows.Forms;
 
 namespace Rotronic
 {
+
+
     public partial class CalProgressFrm : Form
     {
         private readonly List<ListViewItem> _selectedProbes;
@@ -91,50 +93,79 @@ namespace Rotronic
         }
 
          public void TemperatureStep(args)
-        {
-            instructions for a temperature step go here.
-        }
+         {
+             instructions for a temperature step go here.
+         }
 
-        public void AdvancedTemperatureStep(args)
-        {
-            advanced temperature adjustment should go here
-        }
+         public void AdvancedTemperatureStep(args)
+         {
+             advanced temperature adjustment should go here
+         }
 
-        public void HumidityAdjustmentStep(args)
-        {
-            instructions for a humidity adjustment step go here.
-        }
-        public void TemperatureAdjustmentStep(args)
-        {
-            instructions for a temperature adjustment step go here.
-        }
-        public void AdjustStep(args)
-        {
-        send adjust commmand to probe
-        }
+         public void HumidityAdjustmentStep(args)
+         {
+             instructions for a humidity adjustment step go here.
+         }
+         public void TemperatureAdjustmentStep(args)
+         {
+             instructions for a temperature adjustment step go here.
+         }
+         public void AdjustStep(args)
+         {
+         send adjust commmand to probe
+         }
 
-        Data to record during calibration
-            Probe Temperature
-            Probe Humidity
-            Probe Resistance
-            Probe Temperature Count
-            Probe Humidity Count
-            Chamber TempSP - recorded from chamber - static
-            Chamber RHSP - recorded from chamber
-            Chamber Temp - recorded from mirror - static
-            Chamber RH - recorded from mirror
-            Probe Name - static
-            Probe SN - static
-            Chamber Name - static
-            Mirror SN -static
-            TODO: list of Mirrors and Chambers and corresponding calibration information for traceability records and to ensure everything is in calibration at start of calibration procedure.
-            
-            Take 5 data points at each step at 15 second intervals.
-            verify values are within acceptable range of chamber conditions, if not, flag step for review and possible repeat of step after troubleshooting chamber conditions.
-            verify values don't indicate malfunction of any equipment.
-            Save data at each step to database or excel file for record keeping. TODO: storage method.
-            
-        */
+            /*
+     Public members reference (auto-inserted)
+     
+        pseudo-code:
+        bool completed = false;
+        status false if at start of calibration, true at end of calibration.
+        public void DataCollector(step, chamber, mirror, probe, _manual, optional bool completed)
+        {
+            if (!completed)
+            {
+                //record all Static Data, all dynamic data that does not frequently change
+                //helper data to add: time stamp for start of calibration
+            }
+             else if (completed)
+             {
+                // record all infrequently changing dynamic data - probe coefficients and corrections made will be captured here.
+                //helper data to add: time stamp for end of calibration
+             }
+            else (if completed is not in method)
+             {
+                //record all dynamic data that should be recorded at each step, including chamber conditions, probe measurements, and mirror measurements.
+                //add time stamp for each sample
+             }
+             if (!_manual)
+             {
+                //no data can be collected from the chamber. Assume chamber conditions are at the step set points. Record manual status.
+             }
+        Organize data and save to attached structured database. TBI
+        }
+            storage method tbd
+            static data
+              Probe:
+                -trivial data:
+                    ComPort, HumidityUnit(Assume %RH), HumidityAlarm, Humidity Trend, TemperatureAlarm, TemperatureTrend, TemperatureUnit (normalize all to °C,
+                    make C stored value for every temperature, CalculatedParameter, CalculatedValue, CalculatedUnit, CalculatedAlarm, CalculatedTrend, AlarmByte, DeviceType,
+                    ProbeAddress, CelsiusHelper, InUse, Selected
+                -Important Static Data, but unlikely to ever change: ProbeType, DeviceModel, FIrmwareVersion, SerialNumber, DeviceType, ProbeName
+                -Important Dynamic Data, but does not frequently change. Record at start and end of calibration procedure, does not need to be recorded at each step: HumidityFactoryCorrection,
+                   HumidityUserCorrection, HumidityTemperatureCorrection, HumidityDriftCorrection, PT100CoeffA, PT100CoeffB, PT100CoeffC, TempOffset, TempConversion.
+                -Dynamic Data that should be recorded at each step: Humidity, HumidityCount, HumdityRaw, Temperature, TemperatureCount, Resistance
+             Mirror:
+                -trivial data: Most of mirror data is not relavent. We're primarily concerned with Humidity and External/Mirror temp.
+                -Important Static Data: ID, IDN, SerialNumber
+                -Important Dynamic Data, but does not frequently change: None
+                -Dynamic Data that should be recorded at each step: DewPoint, FrostPoint, Humidity, ExternalTemp, MirrorTemp
+            Chamber:
+                -Trivial Data: IPAddress, TempControl, HumControl, TempStable, HumStable, DessicantLevel, DessicantSerial, WaterLevel, Calculation, Anything External Reference related, Warning, ProgramRunning, InUse, Selected
+                -Important Static Data: Name, HC2Serial, ControllerSerial, Version
+                -Important Dynamic Data with infrequent changes: None
+                -Important Dynamic Data to record at each step: Temperature, TemperatureSP, Humidity, HumiditySP
+    */
         public void SafeClose(Chamber chamber)
         {
             ChamberCommands.SetRHControl(chamber, false);
@@ -142,3 +173,104 @@ namespace Rotronic
         }
     }
 }
+/*
+ * 
+     RotProbe (class: RotProbe)
+      - string ComPort { get; set; }
+      - string ProbeType { get; set; }
+      - double Humidity { get; set; }
+      - int HumidityCount { get; set; }
+      - double HumdityRaw { get; set; }
+      - double HumidityFactoryCorrection { get; set; }
+      - double HumidityUserCorrection { get; set; }
+      - double HumidityTemperatureCorrection { get; set; }
+      - double HumidityDriftCorrection { get; set; }
+      - string HumidityUnit { get; set; }
+      - bool HumidityAlarm { get; set; }
+      - char HumidityTrend { get; set; }
+      - double Temperature { get; set; }
+      - int TemperatureCount { get; set; }
+      - double Resistance { get; set; }
+      - double PT100CoeffA { get; set; }
+      - double PT100CoeffB { get; set; }
+      - double PT100CoeffC { get; set; }
+      - double TempOffset { get; set; }
+      - double TempConversion { get; set; }
+      - string TemperatureUnit { get; set; }
+      - bool TemperatureAlarm { get; set; }
+      - char TemperatureTrend { get; set; }
+      - string CalculatedParameter { get; set; }
+      - double CalculatedValue { get; set; }
+      - string CalculatedUnit { get; set; }
+      - bool CalculatedAlarm { get; set; }
+      - char CalculatedTrend { get; set; }
+      - string DeviceModel { get; set; }
+      - string FirmwareVersion { get; set; }
+      - string SerialNumber { get; set; }
+      - string DeviceName { get; set; }
+      - string AlarmByte { get; set; }
+      - char DeviceType { get; set; }
+      - string ProbeAddress { get; set; }
+      - bool CelsiusHelper { get; set; }
+      - bool InUse { get; set; }
+      - bool Selected { get; set; }
+
+
+     Mirror (class: Mirror)
+      - string ComPort { get; set; }
+      - string SerialNumber { get; set; }
+      - double DewPoint { get; set; }
+      - double FrostPoint { get; set; }
+      - double Humdity { get; set; }
+      - double WMO { get; set; }
+      - double VolumeRatio { get; set; }
+      - double WeightRatio { get; set; }
+      - double AbsoluteHumdity { get; set; }
+      - double SpecificHumdity { get; set; }
+      - double VaporPressure { get; set; }
+      - double HeadPressure { get; set; }
+      - double ExternalTemp { get; set; }
+      - double MirrorTemp { get; set; }
+      - double HeadTemp { get; set; }
+      - double MirrorResistance { get; set; }
+      - double ExternalResistance { get; set; }
+      - string ID { get; set; }
+      - string IDN { get; set; }
+      - bool Stable { get; set; }
+      - bool InUse { get; set; }
+      - bool Selected { get; set; }
+
+     Chamber (class: Chamber)
+      - string IPAddress { get; set; }
+      - double Temperature { get; set; }
+      - double TemperatureReference { get; set; }
+      - bool TempControl { get; set; }
+      - double TemperatureSP { get; set; }
+      - bool TempStable { get; set; }
+      - double Humidity { get; set; }
+      - double HumidityReference { get; set; }
+      - bool HumControl { get; set; }
+      - double HumiditySP { get; set; }
+      - bool HumStable { get; set; }
+      - double DessicentLevel { get; set; }
+      - double WaterLevel { get; set; }
+      - string HC2Serial { get; set; }
+      - string DessicantSerial { get; set; }
+      - string Version { get; set; }
+      - string ControllerSerial { get; set; }
+      - string Name { get; set; }
+      - bool CorrApplied { get; set; }
+      - bool Calculation { get; set; }
+      - string ExtRefSerial { get; set; }
+      - double ExtRefTemp { get; set; }
+      - double ExtRefDP { get; set; }
+      - double ExtRefDPCorr { get; set; }
+      - double ExtRefFP { get; set; }
+      - double ExtRefRH { get; set; }
+      - bool ExtRefControl { get; set; }
+      - bool ExtRefStable { get; set; }
+      - string Warning { get; set; }
+      - bool ProgramRunning { get; set; }
+      - bool InUse { get; set; }
+      - bool Selected { get; set; }
+ */

@@ -12,11 +12,29 @@ namespace Rotronic
 {
     public partial class CalProgressFrm : Form
     {
+        private readonly List<ListViewItem> _selectedProbes;
+        private readonly ListViewItem _selectedMirrorItem;
+        private readonly ListViewItem _selectedChamberItem;
+        private readonly Chamber _selectedChamber;
+        private readonly List<StepClass> _steps;
+        private readonly bool _manual;
+        private readonly bool _advancedTemp;
+
+
         public CalProgressFrm(List<ListViewItem> SelectedProbes, ListViewItem SelectedMirror, ListViewItem SelectedChamber, List<StepClass> Steps, bool Manual, bool AdvancedTemp)
         {
             InitializeComponent();
-
             this.FormClosed += CalProgressFrm_FormClosed;
+
+            _selectedProbes = SelectedProbes ?? new List<ListViewItem>();
+            _selectedMirrorItem = SelectedMirror;
+            _selectedChamberItem = SelectedChamber;
+            _selectedChamber = SelectedChamber?.Tag as Chamber;
+
+            _steps = Steps ?? new List<StepClass>();
+            _manual = Manual;
+            _advancedTemp = AdvancedTemp;
+
 
             /*
              * General plan for calibration procedures and UI/UX features to implement:
@@ -42,7 +60,8 @@ namespace Rotronic
 
         private void CalProgressFrm_FormClosed(object sender, FormClosedEventArgs e)
         {
-            SafeClose();
+            if (_selectedChamber != null)
+                SafeClose(_selectedChamber);
         }
         public void ChamberController(Chamber chamber, bool Manual, StepClass stepClass)
         {
@@ -53,21 +72,73 @@ namespace Rotronic
             else
             {
                 ChamberCommands.SetTempSP(chamber, stepClass.SetPointTemp);
-                ChamberCommands.SetHumSP(chamber, stepClass.SetPointRH);
+                ChamberCommands.SetRHSP(chamber, stepClass.SetPointRH);
                 ChamberCommands.SetTempControl(chamber, true);
                 ChamberCommands.SetRHControl(chamber, true);
                 // Monitor stability and begin soak time countdown when stable
                 while (!chamber.TempStable || !chamber.HumStable)
                 {
                     //TODO: Add timeout in case chamber cannot reach conditions - 0°C and 5%RH are difficult conditions, need a "close enough" option
+                    //TODO: UI element to show stability status and current chamber conditions
                     Application.DoEvents(); // Keep UI responsive
                 }
             }
         }
-        public void SafeClose()
+        /*
+        public void HumidityStep(args)
         {
-            ChamberCommands.SetRHControl(SelectedChamber, false);
-            ChamberCommands.SetTempControl(SelectedChamber, false);
+            instructions for a humidity step go here.
+        }
+
+         public void TemperatureStep(args)
+        {
+            instructions for a temperature step go here.
+        }
+
+        public void AdvancedTemperatureStep(args)
+        {
+            advanced temperature adjustment should go here
+        }
+
+        public void HumidityAdjustmentStep(args)
+        {
+            instructions for a humidity adjustment step go here.
+        }
+        public void TemperatureAdjustmentStep(args)
+        {
+            instructions for a temperature adjustment step go here.
+        }
+        public void AdjustStep(args)
+        {
+        send adjust commmand to probe
+        }
+
+        Data to record during calibration
+            Probe Temperature
+            Probe Humidity
+            Probe Resistance
+            Probe Temperature Count
+            Probe Humidity Count
+            Chamber TempSP - recorded from chamber - static
+            Chamber RHSP - recorded from chamber
+            Chamber Temp - recorded from mirror - static
+            Chamber RH - recorded from mirror
+            Probe Name - static
+            Probe SN - static
+            Chamber Name - static
+            Mirror SN -static
+            TODO: list of Mirrors and Chambers and corresponding calibration information for traceability records and to ensure everything is in calibration at start of calibration procedure.
+            
+            Take 5 data points at each step at 15 second intervals.
+            verify values are within acceptable range of chamber conditions, if not, flag step for review and possible repeat of step after troubleshooting chamber conditions.
+            verify values don't indicate malfunction of any equipment.
+            Save data at each step to database or excel file for record keeping. TODO: storage method.
+            
+        */
+        public void SafeClose(Chamber chamber)
+        {
+            ChamberCommands.SetRHControl(chamber, false);
+            ChamberCommands.SetTempControl(chamber, false);
         }
     }
 }

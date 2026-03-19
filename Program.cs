@@ -66,6 +66,13 @@ namespace Rotronic
         [STAThread]
         static void Main()
         {
+            try
+            {
+                Data.InitializeDatabase();
+            }
+            catch
+            {
+            }
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);

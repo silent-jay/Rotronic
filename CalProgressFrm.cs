@@ -18,9 +18,15 @@ namespace Rotronic
         private readonly ListViewItem _selectedMirrorItem;
         private readonly ListViewItem _selectedChamberItem;
         private readonly Chamber _selectedChamber;
+        private readonly Mirror _selectedMirror;
         private readonly List<StepClass> _steps;
         private readonly bool _manual;
         private readonly bool _advancedTemp;
+
+        private readonly Timer _uiRefreshTimer = new Timer();
+
+        private Timer _soakTimer;
+        private TimeSpan _soakRemaining = TimeSpan.Zero;
 
 
         public CalProgressFrm(List<ListViewItem> SelectedProbes, ListViewItem SelectedMirror, ListViewItem SelectedChamber, List<StepClass> Steps, bool Manual, bool AdvancedTemp)
@@ -32,10 +38,30 @@ namespace Rotronic
             _selectedMirrorItem = SelectedMirror;
             _selectedChamberItem = SelectedChamber;
             _selectedChamber = SelectedChamber?.Tag as Chamber;
+            _selectedMirror = SelectedMirror?.Tag as Mirror;
 
             _steps = Steps ?? new List<StepClass>();
             _manual = Manual;
             _advancedTemp = AdvancedTemp;
+
+            PopulateProbeComboBox();
+
+            comboBoxRotProbe.DropDownStyle = ComboBoxStyle.DropDownList;
+            comboBoxRotProbe.IntegralHeight = true;
+            comboBoxRotProbe.DropDownWidth = Math.Max(comboBoxRotProbe.Width, 450);
+
+            textBoxTemp.ReadOnly = true;
+            textBoxTemp.TabStop = false;
+            textBoxHum.ReadOnly = true;
+            textBoxHum.TabStop = false;
+            textBoxTempSP.ReadOnly = true;
+            textBoxTempSP.TabStop = false;
+            textBoxHumSP.ReadOnly = true;
+            textBoxHumSP.TabStop = false;
+
+            _uiRefreshTimer.Interval = 500;
+            _uiRefreshTimer.Tick += (s, e) => RefreshLiveReadings();
+            _uiRefreshTimer.Start();
 
 
             /*
@@ -60,8 +86,136 @@ namespace Rotronic
             
         }
 
+        private sealed class ProbeComboItem
+        {
+            public ProbeComboItem(RotProbe probe, string display)
+            {
+                Probe = probe;
+                Display = display;
+            }
+
+            public RotProbe Probe { get; }
+            public string Display { get; }
+
+            public override string ToString()
+            {
+                return Display;
+            }
+        }
+
+        private void PopulateProbeComboBox()
+        {
+            comboBoxRotProbe.BeginUpdate();
+            try
+            {
+                comboBoxRotProbe.Items.Clear();
+
+                foreach (var item in _selectedProbes)
+                {
+                    var probe = item?.Tag as RotProbe;
+                    if (probe == null) continue;
+
+                    var name = string.IsNullOrWhiteSpace(probe.DeviceName) ? "(Unnamed)" : probe.DeviceName;
+                    var serial = string.IsNullOrWhiteSpace(probe.SerialNumber) ? "(No SN)" : probe.SerialNumber;
+                    comboBoxRotProbe.Items.Add(new ProbeComboItem(probe, name + "  |  " + serial));
+                }
+
+                if (comboBoxRotProbe.Items.Count > 0)
+                    comboBoxRotProbe.SelectedIndex = 0;
+            }
+            finally
+            {
+                comboBoxRotProbe.EndUpdate();
+            }
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            RefreshStabilityIndicators();
+            RefreshLiveReadings();
+        }
+
+        public void RefreshStabilityIndicators()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)RefreshStabilityIndicators);
+                return;
+            }
+
+            bool chamberStable = _selectedChamber != null && _selectedChamber.TempStable && _selectedChamber.HumStable;
+            bool mirrorStable = _selectedMirror != null && _selectedMirror.Stable;
+
+            panelChamberStable.BackColor = chamberStable ? Color.LimeGreen : Color.Red;
+            panelMirrorStable.BackColor = mirrorStable ? Color.LimeGreen : Color.Red;
+
+            panelChamberStable.Invalidate();
+            panelMirrorStable.Invalidate();
+        }
+
+        public void RefreshLiveReadings()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)RefreshLiveReadings);
+                return;
+            }
+
+            if (_selectedMirror != null)
+            {
+                textBoxTemp.Text = _selectedMirror.MirrorTemp.ToString("F2") + " °C";
+                textBoxHum.Text = _selectedMirror.Humdity.ToString("F2") + " %RH";
+            }
+
+            if (_selectedChamber != null)
+            {
+                textBoxTempSP.Text = _selectedChamber.TemperatureSP.ToString("F2") + " °C";
+                textBoxHumSP.Text = _selectedChamber.HumiditySP.ToString("F2") + " %RH";
+            }
+        }
+
+        private static void PaintIndicatorCircle(object sender, PaintEventArgs e)
+        {
+            var panel = sender as Panel;
+            if (panel == null) return;
+
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var rect = panel.ClientRectangle;
+            rect.Inflate(-1, -1);
+
+            using (var brush = new SolidBrush(panel.BackColor))
+            {
+                e.Graphics.FillEllipse(brush, rect);
+            }
+
+            using (var pen = new Pen(Color.Black, 1f))
+            {
+                e.Graphics.DrawEllipse(pen, rect);
+            }
+        }
+
+        private void panelChamberStable_Paint(object sender, PaintEventArgs e)
+        {
+            PaintIndicatorCircle(sender, e);
+        }
+
+        private void panelMirrorStable_Paint(object sender, PaintEventArgs e)
+        {
+            PaintIndicatorCircle(sender, e);
+        }
+
         private void CalProgressFrm_FormClosed(object sender, FormClosedEventArgs e)
         {
+            _uiRefreshTimer.Stop();
+            _uiRefreshTimer.Dispose();
+
+            SkipSoakTimer();
+
             if (_selectedChamber != null)
                 SafeClose(_selectedChamber);
         }
@@ -82,8 +236,11 @@ namespace Rotronic
                 {
                     //TODO: Add timeout in case chamber cannot reach conditions - 0°C and 5%RH are difficult conditions, need a "close enough" option
                     //TODO: UI element to show stability status and current chamber conditions
+                    RefreshStabilityIndicators();
                     Application.DoEvents(); // Keep UI responsive
                 }
+
+                RefreshStabilityIndicators();
             }
         }
         /*
@@ -151,7 +308,7 @@ namespace Rotronic
                     ComPort, HumidityUnit(Assume %RH), HumidityAlarm, Humidity Trend, TemperatureAlarm, TemperatureTrend, TemperatureUnit (normalize all to °C,
                     make C stored value for every temperature, CalculatedParameter, CalculatedValue, CalculatedUnit, CalculatedAlarm, CalculatedTrend, AlarmByte, DeviceType,
                     ProbeAddress, CelsiusHelper, InUse, Selected
-                -Important Static Data, but unlikely to ever change: ProbeType, DeviceModel, FIrmwareVersion, SerialNumber, DeviceType, ProbeName
+                -Important Static Data, but unlikely to ever change: ProbeType, DeviceModel, FirmwareVersion, SerialNumber, DeviceType, ProbeName
                 -Important Dynamic Data, but does not frequently change. Record at start and end of calibration procedure, does not need to be recorded at each step: HumidityFactoryCorrection,
                    HumidityUserCorrection, HumidityTemperatureCorrection, HumidityDriftCorrection, PT100CoeffA, PT100CoeffB, PT100CoeffC, TempOffset, TempConversion.
                 -Dynamic Data that should be recorded at each step: Humidity, HumidityCount, HumdityRaw, Temperature, TemperatureCount, Resistance
@@ -170,6 +327,127 @@ namespace Rotronic
         {
             ChamberCommands.SetRHControl(chamber, false);
             ChamberCommands.SetTempControl(chamber, false);
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            if (button1.Text == "Start Calibration")
+            {
+                StartCalRoutine();
+                StepClass test = new StepClass();
+                test.SoakTime = "00:15";
+                SoakTimer(test);
+                button1.Text = "Skip Soak";
+                return;
+            }
+            else if (button1.Text == "Skip Soak")
+            {
+                SkipSoakTimer();
+                button1.Text = "Start Calibration";
+
+                //skip soak logic
+            }
+        }
+
+        public void SoakTimer(StepClass step)
+        {
+            if (step == null) return;
+
+            var soakText = (step.SoakTime ?? string.Empty).Trim();
+            if (!TryParseHourMinute(soakText, out var duration))
+                duration = TimeSpan.Zero;
+
+            _soakRemaining = duration;
+            UpdateSoakTextBox();
+
+            if (_soakRemaining == TimeSpan.Zero)
+                return;
+
+            if (_soakTimer == null)
+            {
+                _soakTimer = new Timer();
+                _soakTimer.Interval = 1000;
+                _soakTimer.Tick += SoakTimer_Tick;
+            }
+
+            _soakTimer.Start();
+        }
+        public void SkipSoakTimer()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)SkipSoakTimer);
+                return;
+            }
+
+            _soakRemaining = TimeSpan.Zero;
+            UpdateSoakTextBox();
+
+            if (_soakTimer != null)
+            {
+                _soakTimer.Stop();
+                _soakTimer.Tick -= SoakTimer_Tick;
+                _soakTimer.Dispose();
+                _soakTimer = null;
+            }
+        }
+
+        private void SoakTimer_Tick(object sender, EventArgs e)
+        {
+            if (_soakRemaining > TimeSpan.Zero)
+                _soakRemaining = _soakRemaining.Subtract(TimeSpan.FromSeconds(1));
+
+            if (_soakRemaining < TimeSpan.Zero)
+                _soakRemaining = TimeSpan.Zero;
+
+            UpdateSoakTextBox();
+
+            if (_soakRemaining == TimeSpan.Zero)
+                SkipSoakTimer();
+        }
+
+        private void UpdateSoakTextBox()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)UpdateSoakTextBox);
+                return;
+            }
+
+            textBoxSoak.ReadOnly = true;
+            textBoxSoak.TabStop = false;
+            textBoxSoak.Text = string.Format("{0:D2}:{1:D2}:{2:D2}", (int)_soakRemaining.TotalHours, _soakRemaining.Minutes, _soakRemaining.Seconds);
+        }
+
+        private static bool TryParseHourMinute(string value, out TimeSpan duration)
+        {
+            duration = TimeSpan.Zero;
+            if (string.IsNullOrWhiteSpace(value)) return false;
+
+            var parts = value.Split(':');
+            if (parts.Length != 2) return false;
+
+            if (!int.TryParse(parts[0], out var hours)) return false;
+            if (!int.TryParse(parts[1], out var minutes)) return false;
+
+            if (hours < 0 || minutes < 0 || minutes > 59) return false;
+            duration = new TimeSpan(hours, minutes, 0);
+            return true;
+        }
+
+        public void StartCalRoutine()
+        {
+            /*Foreach step in steps:
+             * if step is Humidity and adjust is false, do humidity step
+             * if step is humidity and adjuist is true , do humidity adjustment step
+             * if step is temperature step and adjust is falso, do temperature step
+             * if step is temperature step and adjust is true, do temperature adjustment step
+             * if advanced temperature adjustment step, do advanced temperature adjustment step
+             * 
+             */
+            return;
         }
     }
 }

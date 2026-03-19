@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace Rotronic
 {
-    internal class Mirror
+    public class Mirror
     {
         /*
          PSEUDOCODE / PLAN (detailed)

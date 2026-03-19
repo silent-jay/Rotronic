@@ -38,37 +38,6 @@ namespace Rotronic
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = @"
-CREATE TABLE IF NOT EXISTS Device (
-    DeviceId INTEGER PRIMARY KEY AUTOINCREMENT,
-    Name TEXT NULL,
-    SerialNumber TEXT NULL,
-    Model TEXT NULL,
-    CreatedUtc TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS CalibrationRun (
-    CalibrationRunId INTEGER PRIMARY KEY AUTOINCREMENT,
-    DeviceId INTEGER NOT NULL,
-    StartedUtc TEXT NOT NULL,
-    Operator TEXT NULL,
-    Notes TEXT NULL,
-    FOREIGN KEY(DeviceId) REFERENCES Device(DeviceId) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS CalibrationPoint (
-    CalibrationPointId INTEGER PRIMARY KEY AUTOINCREMENT,
-    CalibrationRunId INTEGER NOT NULL,
-    PointIndex INTEGER NOT NULL,
-    Setpoint REAL NULL,
-    Measured REAL NULL,
-    Units TEXT NULL,
-    TimestampUtc TEXT NOT NULL,
-    FOREIGN KEY(CalibrationRunId) REFERENCES CalibrationRun(CalibrationRunId) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS IX_Device_SerialNumber ON Device(SerialNumber);
-CREATE INDEX IF NOT EXISTS IX_CalibrationRun_DeviceId ON CalibrationRun(DeviceId);
-CREATE INDEX IF NOT EXISTS IX_CalibrationPoint_RunId ON CalibrationPoint(CalibrationRunId);
 
 CREATE TABLE IF NOT EXISTS Probe (
     SerialNumber TEXT NOT NULL PRIMARY KEY,
@@ -77,7 +46,6 @@ CREATE TABLE IF NOT EXISTS Probe (
     FirmwareVersion TEXT NULL,
     DeviceName TEXT NULL,
     DeviceType TEXT NULL,
-    ProbeAddress TEXT NULL,
     HumidityFactoryCorrection REAL NULL,
     HumidityUserCorrection REAL NULL,
     HumidityTemperatureCorrection REAL NULL,
@@ -137,6 +105,7 @@ CREATE TABLE IF NOT EXISTS Step (
     HumiditySetpoint REAL NULL,
     TemperatureSetpointC REAL NULL,
     Accuracy REAL NULL,
+    Adjustment INTEGER NULL,
     RampStartUtc TEXT NULL,
     SoakStartUtc TEXT NULL,
     SoakEndUtc TEXT NULL,

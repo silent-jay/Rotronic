@@ -1,0 +1,370 @@
+        /*
+         * PSEUDOCODE / PLAN (detailed)
+         * 
+         * Goal:
+         * - Implement initial data recording for a calibration run:
+         *   - For each `RotProbe` in `rotProbes`: upsert probe master data.
+         *   - Then upsert mirror master data.
+         *   - Then upsert chamber master data.
+         * - Avoid opening/closing SQLite and starting transactions for each probe.
+         * - Refactor `DataRecorderInitial` into:
+         *   - One public entrypoint taking list + mirror + chamber.
+         *   - One internal helper that writes all entities in a single transaction:
+         *     - Upsert probes (loop once)
+         *     - Upsert mirror (once)
+         *     - Upsert chamber (once)
+         * - Keep existing schema usage and placeholder timestamps.
+         * - Fix invalid SQL typos in existing method (`SELECT1` -> `SELECT 1`, `LIMIT1` -> `LIMIT 1`).
+         * 
+         * Steps:
+         * 1) Add `DataRecorderInitial(List<RotProbe>, Chamber, Mirror)` overload.
+         * 2) Refactor connection/transaction logic into `UpsertInitialMasterData(...)`.
+         * 3) Keep existing single-probe API by forwarding to the new overload (backward compatible).
+         * 4) Implement `StartCalRoutine` initial data recording call.
+         */
+
+        public void DataRecorderInitial(List<RotProbe> rotProbes, Chamber chamber, Mirror mirror)
+        {
+            if ((rotProbes == null || rotProbes.Count == 0) && chamber == null && mirror == null)
+                return;
+
+            try
+            {
+                var dbPath = Data.GetDatabasePath();
+                var connStr = string.Format(System.Globalization.CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+                using (var conn = new SQLiteConnection(connStr))
+                {
+                    conn.Open();
+
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        UpsertInitialMasterData(conn, tx, rotProbes, chamber, mirror);
+                        tx.Commit();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    MessageBox.Show("Failed to record initial master data: " + ex.Message, "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                catch { }
+            }
+        }
+
+        // Keep existing signature for callers that pass a single probe.
+        public void DataRecorderInitial(RotProbe probe, Chamber chamber, Mirror mirror)
+        {
+            var probes = probe != null ? new List<RotProbe> { probe } : new List<RotProbe>();
+            DataRecorderInitial(probes, chamber, mirror);
+        }
+
+        private static void UpsertInitialMasterData(SQLiteConnection conn, SQLiteTransaction tx, List<RotProbe> rotProbes, Chamber chamber, Mirror mirror)
+        {
+            if (conn == null) throw new ArgumentNullException(nameof(conn));
+
+            // Use a very explicit placeholder for "unknown/not yet calibrated".
+            // Stored in ISO8601 UTC format for consistency with other timestamps.
+            var placeholderUtc = new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var placeholderIso = placeholderUtc.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+
+            // --- Probes (loop once) ---
+            if (rotProbes != null && rotProbes.Count > 0)
+            {
+                foreach (var probe in rotProbes)
+                {
+                    if (probe == null) continue;
+                    if (string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+
+                    var serial = probe.SerialNumber.Trim();
+                    if (serial.Length == 0) continue;
+
+                    bool exists;
+                    using (var existsCmd = conn.CreateCommand())
+                    {
+                        existsCmd.Transaction = tx;
+                        existsCmd.CommandText = "SELECT 1 FROM Probe WHERE SerialNumber = @sn LIMIT 1;";
+                        existsCmd.Parameters.AddWithValue("@sn", serial);
+                        exists = existsCmd.ExecuteScalar() != null;
+                    }
+
+                    if (exists)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE Probe SET
+    ProbeType = @ProbeType,
+    DeviceModel = @DeviceModel,
+    FirmwareVersion = @FirmwareVersion,
+    DeviceName = @DeviceName,
+    DeviceType = @DeviceType,
+    HumidityFactoryCorrection = @HumidityFactoryCorrection,
+    HumidityUserCorrection = @HumidityUserCorrection,
+    HumidityTemperatureCorrection = @HumidityTemperatureCorrection,
+    HumidityDriftCorrection = @HumidityDriftCorrection,
+    PT100CoeffA = @PT100CoeffA,
+    PT100CoeffB = @PT100CoeffB,
+    PT100CoeffC = @PT100CoeffC,
+    TempOffset = @TempOffset,
+    TempConversion = @TempConversion,
+    LastCalibrationUtc = COALESCE(LastCalibrationUtc, @LastCalibrationUtc),
+    NextDueUtc = COALESCE(NextDueUtc, @NextDueUtc)
+WHERE SerialNumber = @SerialNumber;";
+
+                            cmd.Parameters.AddWithValue("@ProbeType", (object)probe.ProbeType ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DeviceModel", (object)probe.DeviceModel ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@FirmwareVersion", (object)probe.FirmwareVersion ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DeviceName", (object)probe.DeviceName ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DeviceType", probe.DeviceType == '\0' ? (object)DBNull.Value : probe.DeviceType.ToString());
+                            cmd.Parameters.AddWithValue("@HumidityFactoryCorrection", probe.HumidityFactoryCorrection);
+                            cmd.Parameters.AddWithValue("@HumidityUserCorrection", probe.HumidityUserCorrection);
+                            cmd.Parameters.AddWithValue("@HumidityTemperatureCorrection", probe.HumidityTemperatureCorrection);
+                            cmd.Parameters.AddWithValue("@HumidityDriftCorrection", probe.HumidityDriftCorrection);
+                            cmd.Parameters.AddWithValue("@PT100CoeffA", probe.PT100CoeffA);
+                            cmd.Parameters.AddWithValue("@PT100CoeffB", probe.PT100CoeffB);
+                            cmd.Parameters.AddWithValue("@PT100CoeffC", probe.PT100CoeffC);
+                            cmd.Parameters.AddWithValue("@TempOffset", probe.TempOffset);
+                            cmd.Parameters.AddWithValue("@TempConversion", probe.TempConversion);
+                            cmd.Parameters.AddWithValue("@LastCalibrationUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@NextDueUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@SerialNumber", serial);
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO Probe (
+    SerialNumber,
+    ProbeType,
+    DeviceModel,
+    FirmwareVersion,
+    DeviceName,
+    DeviceType,
+    HumidityFactoryCorrection,
+    HumidityUserCorrection,
+    HumidityTemperatureCorrection,
+    HumidityDriftCorrection,
+    PT100CoeffA,
+    PT100CoeffB,
+    PT100CoeffC,
+    TempOffset,
+    TempConversion,
+    LastCalibrationUtc,
+    NextDueUtc
+) VALUES (
+    @SerialNumber,
+    @ProbeType,
+    @DeviceModel,
+    @FirmwareVersion,
+    @DeviceName,
+    @DeviceType,
+    @HumidityFactoryCorrection,
+    @HumidityUserCorrection,
+    @HumidityTemperatureCorrection,
+    @HumidityDriftCorrection,
+    @PT100CoeffA,
+    @PT100CoeffB,
+    @PT100CoeffC,
+    @TempOffset,
+    @TempConversion,
+    @LastCalibrationUtc,
+    @NextDueUtc
+);";
+
+                            cmd.Parameters.AddWithValue("@SerialNumber", serial);
+                            cmd.Parameters.AddWithValue("@ProbeType", (object)probe.ProbeType ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DeviceModel", (object)probe.DeviceModel ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@FirmwareVersion", (object)probe.FirmwareVersion ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DeviceName", (object)probe.DeviceName ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DeviceType", probe.DeviceType == '\0' ? (object)DBNull.Value : probe.DeviceType.ToString());
+                            cmd.Parameters.AddWithValue("@HumidityFactoryCorrection", probe.HumidityFactoryCorrection);
+                            cmd.Parameters.AddWithValue("@HumidityUserCorrection", probe.HumidityUserCorrection);
+                            cmd.Parameters.AddWithValue("@HumidityTemperatureCorrection", probe.HumidityTemperatureCorrection);
+                            cmd.Parameters.AddWithValue("@HumidityDriftCorrection", probe.HumidityDriftCorrection);
+                            cmd.Parameters.AddWithValue("@PT100CoeffA", probe.PT100CoeffA);
+                            cmd.Parameters.AddWithValue("@PT100CoeffB", probe.PT100CoeffB);
+                            cmd.Parameters.AddWithValue("@PT100CoeffC", probe.PT100CoeffC);
+                            cmd.Parameters.AddWithValue("@TempOffset", probe.TempOffset);
+                            cmd.Parameters.AddWithValue("@TempConversion", probe.TempConversion);
+                            cmd.Parameters.AddWithValue("@LastCalibrationUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@NextDueUtc", placeholderIso);
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+
+            // --- Mirror (once, after probes) ---
+            if (mirror != null && !string.IsNullOrWhiteSpace(mirror.SerialNumber))
+            {
+                var serial = mirror.SerialNumber.Trim();
+                if (serial.Length > 0)
+                {
+                    bool exists;
+                    using (var existsCmd = conn.CreateCommand())
+                    {
+                        existsCmd.Transaction = tx;
+                        existsCmd.CommandText = "SELECT 1 FROM Mirror WHERE SerialNumber = @sn LIMIT 1;";
+                        existsCmd.Parameters.AddWithValue("@sn", serial);
+                        exists = existsCmd.ExecuteScalar() != null;
+                    }
+
+                    if (exists)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE Mirror SET
+    ID = @ID,
+    IDN = @IDN,
+    LastCalibrationUtc = COALESCE(LastCalibrationUtc, @LastCalibrationUtc),
+    NextDueUtc = COALESCE(NextDueUtc, @NextDueUtc)
+WHERE SerialNumber = @SerialNumber;";
+
+                            cmd.Parameters.AddWithValue("@ID", (object)mirror.ID ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@IDN", (object)mirror.IDN ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@LastCalibrationUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@NextDueUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@SerialNumber", serial);
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO Mirror (
+    SerialNumber,
+    ID,
+    IDN,
+    LastCalibrationUtc,
+    NextDueUtc
+) VALUES (
+    @SerialNumber,
+    @ID,
+    @IDN,
+    @LastCalibrationUtc,
+    @NextDueUtc
+);";
+
+                            cmd.Parameters.AddWithValue("@SerialNumber", serial);
+                            cmd.Parameters.AddWithValue("@ID", (object)mirror.ID ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@IDN", (object)mirror.IDN ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@LastCalibrationUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@NextDueUtc", placeholderIso);
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+
+            // --- Chamber (once, last) ---
+            if (chamber != null)
+            {
+                var controllerSerial = (chamber.ControllerSerial ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(controllerSerial))
+                {
+                    bool exists;
+                    using (var existsCmd = conn.CreateCommand())
+                    {
+                        existsCmd.Transaction = tx;
+                        existsCmd.CommandText = "SELECT 1 FROM Chamber WHERE ControllerSerialNumber = @csn LIMIT 1;";
+                        existsCmd.Parameters.AddWithValue("@csn", controllerSerial);
+                        exists = existsCmd.ExecuteScalar() != null;
+                    }
+
+                    if (exists)
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+UPDATE Chamber SET
+    Name = @Name,
+    LastIpAddress = @LastIpAddress,
+    HC2SerialNumber = @HC2SerialNumber,
+    DessicantSerialNumber = @DessicantSerialNumber,
+    ControlProbeCalibrationUtc = COALESCE(ControlProbeCalibrationUtc, @ControlProbeCalibrationUtc),
+    ControlProbeNextDueUtc = COALESCE(ControlProbeNextDueUtc, @ControlProbeNextDueUtc)
+WHERE ControllerSerialNumber = @ControllerSerialNumber;";
+
+                            cmd.Parameters.AddWithValue("@Name", (object)chamber.Name ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@LastIpAddress", (object)chamber.IPAddress ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@HC2SerialNumber", (object)chamber.HC2Serial ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DessicantSerialNumber", (object)chamber.DessicantSerial ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@ControlProbeCalibrationUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@ControlProbeNextDueUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@ControllerSerialNumber", controllerSerial);
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                    else
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.Transaction = tx;
+                            cmd.CommandText = @"
+INSERT INTO Chamber (
+    ControllerSerialNumber,
+    Name,
+    LastIpAddress,
+    HC2SerialNumber,
+    DessicantSerialNumber,
+    ControlProbeCalibrationUtc,
+    ControlProbeNextDueUtc
+) VALUES (
+    @ControllerSerialNumber,
+    @Name,
+    @LastIpAddress,
+    @HC2SerialNumber,
+    @DessicantSerialNumber,
+    @ControlProbeCalibrationUtc,
+    @ControlProbeNextDueUtc
+);";
+
+                            cmd.Parameters.AddWithValue("@ControllerSerialNumber", controllerSerial);
+                            cmd.Parameters.AddWithValue("@Name", (object)chamber.Name ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@LastIpAddress", (object)chamber.IPAddress ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@HC2SerialNumber", (object)chamber.HC2Serial ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DessicantSerialNumber", (object)chamber.DessicantSerial ?? DBNull.Value);
+                            cmd.Parameters.AddWithValue("@ControlProbeCalibrationUtc", placeholderIso);
+                            cmd.Parameters.AddWithValue("@ControlProbeNextDueUtc", placeholderIso);
+
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+        }
+
+        public void StartCalRoutine(List<RotProbe> rotProbes, Mirror mirrow, Chamber chamber, List<StepClass> steps)
+        {
+            // Initial master-data capture (probe(s) -> mirror -> chamber)
+            DataRecorderInitial(rotProbes, chamber, mirrow);
+
+            /*
+             * if step is Humidity and adjust is false, do humidity step
+             * if step is humidity and adjuist is true , do humidity adjustment step
+             * if step is temperature step and adjust is falso, do temperature step
+             * if step is temperature step and adjust is true, do temperature adjustment step
+             * if advanced temperature adjustment step, do advanced temperature adjustment step
+             * 
+             */
+            return;
+        }

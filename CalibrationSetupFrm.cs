@@ -832,42 +832,27 @@ namespace Rotronic
 
         public void buttonBegin_Click(object sender, EventArgs e)
         {
-            // Collect selected probes
-            var selectedProbes = new List<ListViewItem>();
-            foreach (ListViewItem item in listViewRotProbe.Items)
-            {
-                if (item.Checked)
-                {
-                    selectedProbes.Add(item);
-                }
-            }
-            // Collect selected mirror (exactly one required)
-            ListViewItem selectedMirror = null;
-            int mirrorCount =0;
-            foreach (ListViewItem item in listViewMirror.Items)
-            {
-                if (item.Checked)
-                {
-                    mirrorCount++;
-                    if (mirrorCount ==1)
-                        selectedMirror = item;
-                }
-            }
+            // Collect selected probes (domain objects)
+            var selectedProbeItems = listViewRotProbe.Items.Cast<ListViewItem>().Where(i => i.Checked).ToList();
+            var selectedProbes = selectedProbeItems
+                .Select(i => i?.Tag as RotProbe)
+                .Where(p => p != null)
+                .ToList();
 
-            // Collect selected chamber (exactly one required)
-            ListViewItem selectedChamber = null;
-            int chamberCount = 0;
+            // Collect selected mirror (domain object, exactly one required)
+            var selectedMirrorItem = listViewMirror.Items.Cast<ListViewItem>().FirstOrDefault(i => i.Checked);
+            var mirrorObj = selectedMirrorItem?.Tag as Mirror;
+            int mirrorCount = listViewMirror.Items.Cast<ListViewItem>().Count(i => i.Checked);
+
+            // Collect selected chamber (domain object, exactly one required)
+            ListViewItem selectedChamberItem = null;
+            Chamber chamberObj = null;
+            int chamberCount =0;
             if (listViewChamber != null)
             {
-                foreach (ListViewItem item in listViewChamber.Items)
-                {
-                    if (item.Checked)
-                    {
-                        chamberCount++;
-                        if (chamberCount == 1)
-                            selectedChamber = item;
-                    }
-                }
+                selectedChamberItem = listViewChamber.Items.Cast<ListViewItem>().FirstOrDefault(i => i.Checked);
+                chamberObj = selectedChamberItem?.Tag as Chamber;
+                chamberCount = listViewChamber.Items.Cast<ListViewItem>().Count(i => i.Checked);
             }
 
             // Validate selections
@@ -876,7 +861,7 @@ namespace Rotronic
                 MessageBox.Show("Please select at least one probe for calibration.", "No Probes Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (mirrorCount ==0)
+            if (mirrorCount ==0 || mirrorObj == null)
             {
                 MessageBox.Show("Please select one mirror for calibration.", "No Mirror Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -889,12 +874,12 @@ namespace Rotronic
 
             if (listViewChamber != null)
             {
-                if (chamberCount == 0)
+                if (chamberCount ==0 || chamberObj == null)
                 {
                     MessageBox.Show("Please select one chamber for calibration.", "No Chamber Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
-                if (chamberCount > 1)
+                if (chamberCount >1)
                 {
                     MessageBox.Show("Please select only one chamber for calibration.", "Multiple Chambers Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
@@ -902,63 +887,50 @@ namespace Rotronic
             }
 
             // Block starting a calibration with items already in use
-            var inUseProbes = selectedProbes
-                .Select(i => i?.Tag as RotProbe)
-                .Where(p => p != null && p.InUse)
-                .ToList();
-            if (inUseProbes.Count > 0)
+            var inUseProbes = selectedProbes.Where(p => p.InUse).ToList();
+            if (inUseProbes.Count >0)
             {
                 var probeNames = string.Join(", ", inUseProbes.Select(p => !string.IsNullOrWhiteSpace(p.DeviceName) ? p.DeviceName :
-                                                                            !string.IsNullOrWhiteSpace(p.SerialNumber) ? p.SerialNumber :
-                                                                            !string.IsNullOrWhiteSpace(p.ComPort) ? p.ComPort :
-                                                                            p.ProbeType));
+ !string.IsNullOrWhiteSpace(p.SerialNumber) ? p.SerialNumber :
+ !string.IsNullOrWhiteSpace(p.ComPort) ? p.ComPort :
+ p.ProbeType));
                 MessageBox.Show($"One or more selected probes are already in use: {probeNames}", "Probe Unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            var chamberObj = selectedChamber?.Tag as Chamber;
             if (chamberObj != null && chamberObj.InUse)
             {
                 var chamberName = !string.IsNullOrWhiteSpace(chamberObj.IPAddress) ? chamberObj.IPAddress :
-                                  !string.IsNullOrWhiteSpace(chamberObj.Name) ? chamberObj.Name :
-                                  selectedChamber?.Text;
+ !string.IsNullOrWhiteSpace(chamberObj.Name) ? chamberObj.Name :
+ selectedChamberItem?.Text;
                 MessageBox.Show($"The selected chamber is already in use: {chamberName}", "Chamber Unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            var mirrorObj = selectedMirror?.Tag as Mirror;
-            if (mirrorObj != null && mirrorObj.InUse)
+            if (mirrorObj.InUse)
             {
                 var mirrorName = !string.IsNullOrWhiteSpace(mirrorObj.SerialNumber) ? mirrorObj.SerialNumber :
-                                 !string.IsNullOrWhiteSpace(mirrorObj.ComPort) ? mirrorObj.ComPort :
-                                 !string.IsNullOrWhiteSpace(mirrorObj.ID) ? mirrorObj.ID :
-                                 selectedMirror?.Text;
+ !string.IsNullOrWhiteSpace(mirrorObj.ComPort) ? mirrorObj.ComPort :
+ !string.IsNullOrWhiteSpace(mirrorObj.ID) ? mirrorObj.ID :
+ selectedMirrorItem?.Text;
                 MessageBox.Show($"The selected mirror is already in use: {mirrorName}", "Mirror Unavailable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             // Mark selected items as in-use until the calibration form closes
-            foreach (var item in selectedProbes)
-            {
-                if (item?.Tag is RotProbe p)
-                    p.InUse = true;
-            }
-            if (mirrorObj != null)
-                mirrorObj.InUse = true;
-
+            foreach (var p in selectedProbes)
+                p.InUse = true;
+            mirrorObj.InUse = true;
             if (chamberObj != null)
                 chamberObj.InUse = true;
 
-            var calibrationProcess = new CalProgressFrm(selectedProbes, selectedMirror, selectedChamber, _steps, checkBoxManual.Checked, _advanceTemp);
+            var calibrationProcess = new CalProgressFrm(selectedProbes, mirrorObj, chamberObj, _steps, checkBoxManual.Checked, _advanceTemp);
             calibrationProcess.FormClosed += (s, args) =>
             {
-                foreach (var item in selectedProbes)
-                {
-                    if (item?.Tag is RotProbe p)
-                        p.InUse = false;
-                }
-                if (mirrorObj != null)
-                    mirrorObj.InUse = false;
+                foreach (var p in selectedProbes)
+                    p.InUse = false;
+
+                mirrorObj.InUse = false;
 
                 if (chamberObj != null)
                     chamberObj.InUse = false;

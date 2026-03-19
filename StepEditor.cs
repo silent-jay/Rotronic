@@ -8,7 +8,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-// Requires DocumentFormat.OpenXml NuGet package (Open XML SDK)
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Packaging;
@@ -16,6 +15,7 @@ using DocumentFormat.OpenXml.Spreadsheet;
 
 namespace Rotronic
 {
+    //TODO : save step to db instead of excel, pre-define most calibration workflows to prevent user error.
     public partial class StepEditor : Form
     {
         // Pseudocode / Plan (detailed):

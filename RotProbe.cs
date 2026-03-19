@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Rotronic
 {
-    internal class RotProbe
+    public class RotProbe
     {
         public string ComPort { get; set; }
         public string ProbeType { get; set; }

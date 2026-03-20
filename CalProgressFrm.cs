@@ -623,6 +623,104 @@ INSERT INTO Calibration (
 
         }
 
+        public void DataRecorderSnapShotEnd(RotProbe probe, Mirror mirror, Chamber chamber, string calibrationID)
+        {
+
+            if (string.IsNullOrWhiteSpace(calibrationID))
+                return;
+
+            // Make sure any calibration changes to the probe are reflected in the master record.
+            // This captures the probe's current status for future calibrations/operations.
+            DataRecorderNewOrUpdate(probe, null, null);
+
+            var endedUtcIso = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+
+            string probeSnapshotEndJson = null;
+            if (probe != null)
+            {
+                probeSnapshotEndJson = "{"
+                    + "\"ProbeType\":" + ToJsonString(probe.ProbeType) + ","
+                    + "\"HumidityFactoryCorrection\":" + ToJsonNumber(probe.HumidityFactoryCorrection) + ","
+                    + "\"HumidityUserCorrection\":" + ToJsonNumber(probe.HumidityUserCorrection) + ","
+                    + "\"HumidityTemperatureCorrection\":" + ToJsonNumber(probe.HumidityTemperatureCorrection) + ","
+                    + "\"HumidityDriftCorrection\":" + ToJsonNumber(probe.HumidityDriftCorrection) + ","
+                    + "\"PT100CoeffA\":" + ToJsonNumber(probe.PT100CoeffA) + ","
+                    + "\"PT100CoeffB\":" + ToJsonNumber(probe.PT100CoeffB) + ","
+                    + "\"PT100CoeffC\":" + ToJsonNumber(probe.PT100CoeffC) + ","
+                    + "\"TempOffset\":" + ToJsonNumber(probe.TempOffset) + ","
+                    + "\"TempConversion\":" + ToJsonNumber(probe.TempConversion) + ","
+                    + "\"DeviceModel\":" + ToJsonString(probe.DeviceModel) + ","
+                    + "\"FirmwareVersion\":" + ToJsonString(probe.FirmwareVersion) + ","
+                    + "\"SerialNumber\":" + ToJsonString(probe.SerialNumber) + ","
+                    + "\"DeviceName\":" + ToJsonString(probe.DeviceName) + ","
+                    + "\"DeviceType\":" + (probe.DeviceType == '\0' ? "null" : ToJsonString(probe.DeviceType.ToString()))
+                    + "}";
+            }
+
+            string mirrorSnapshotEndJson = null;
+            if (mirror != null)
+            {
+                mirrorSnapshotEndJson = "{"
+                    + "\"ID\":" + ToJsonString(mirror.ID) + ","
+                    + "\"IDN\":" + ToJsonString(mirror.IDN) + ","
+                    + "\"SerialNumber\":" + ToJsonString(mirror.SerialNumber) + ","
+                    + "\"LastCalibrationUtc\":null,"
+                    + "\"NextDueUtc\":null"
+                    + "}";
+            }
+
+            string chamberSnapshotEndJson = null;
+            if (chamber != null)
+            {
+                chamberSnapshotEndJson = "{"
+                    + "\"Name\":" + ToJsonString(chamber.Name) + ","
+                    + "\"LastIpAddress\":" + ToJsonString(chamber.IPAddress) + ","
+                    + "\"HC2SerialNumber\":" + ToJsonString(chamber.HC2Serial) + ","
+                    + "\"ControlProbeCalibrationUtc\":null,"
+                    + "\"ControlProbeNextDueUtc\":null"
+                    + "}";
+            }
+
+            try
+            {
+                var dbPath = Data.GetDatabasePath();
+                var connStr = string.Format(CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+                using (var conn = new SQLiteConnection(connStr))
+                {
+                    conn.Open();
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+UPDATE Calibration
+SET
+    EndedUtc = @EndedUtc,
+    ProbeSnapshotEndJson = @ProbeSnapshotEndJson,
+    MirrorSnapshotEndJson = @MirrorSnapshotEndJson,
+    ChamberSnapshotEndJson = @ChamberSnapshotEndJson
+WHERE CalibrationId = @CalibrationId;";
+
+                        cmd.Parameters.AddWithValue("@EndedUtc", endedUtcIso);
+                        cmd.Parameters.AddWithValue("@ProbeSnapshotEndJson", (object)probeSnapshotEndJson ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@MirrorSnapshotEndJson", (object)mirrorSnapshotEndJson ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@ChamberSnapshotEndJson", (object)chamberSnapshotEndJson ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@CalibrationId", calibrationID);
+
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    MessageBox.Show("Failed to record calibration end snapshot: " + ex.Message, "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                catch { }
+            }
+        }
+
         private static string ToJsonString(string value)
         {
             if (value == null) return "null";
@@ -946,10 +1044,6 @@ INSERT INTO Chamber (
                 }
                 catch { }
             }
-        }
-        public void HumidityStep(StepClass step, bool Manual)
-        {
-            return;
         }
         /*
 
@@ -1590,12 +1684,6 @@ WHERE StepId = @StepId;";
             {
                 // Swallow to avoid crashing background thread; UI already manages user feedback elsewhere.
             }
-        }
-
-        public void DataRecorderSnapShotEnd(RotProbe probe, Mirror mirror, Chamber chamber, string calibrationID)
-        {
-            // TODO: implement end-of-calibration snapshot and update Calibration.EndedUtc + *SnapshotEndJson.
-            return;
         }
 
         private void WaitForSoakToComplete()

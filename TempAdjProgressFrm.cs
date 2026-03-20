@@ -1115,7 +1115,7 @@ namespace Rotronic
                 double newOffset = (projectedCount / R0) - probe.TempConversion;
 
                 // Attempt to write offset using Commands helper (fire-and-forget)
-                bool ok = Commands.SendNewTemperatureOffset(probe, newOffset);
+                bool ok = RotProbeCommands.SendNewTemperatureOffset(probe, newOffset);
                 AddStep($"Write Offset to {probe.ComPort ?? probe.DeviceName}: {(ok ? "OK" : "FAILED")} (newOffset={newOffset:G9}, projectedCount={projectedCount:F6}, R0={R0:F6})");
             }
 

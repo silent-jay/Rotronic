@@ -76,7 +76,7 @@ using System.Reflection;
 
 namespace Rotronic
 {
-    internal static class Commands
+    internal static class RotProbeCommands
     {
 
         /// <summary>
@@ -120,6 +120,43 @@ namespace Rotronic
             // User requested format: {*##RDD}
             var cmdText = "{" + deviceType + addr + "RDD}\r";
             return new Command(cmdText, timeoutMs, "Read probe (RDD)");
+        }
+        public static Command TempTestPointSaveCmd(RotProbe probe, Mirror mirror, int timeoutMs = 500)
+        {
+            var refTemp = mirror != null ? mirror.MirrorTemp.ToString("F2") : "0.00"; //TODO: ensure mirror temp matches expected format for probe - decimal precision, etc.
+            if (probe == null)
+                throw new ArgumentNullException(nameof(probe));
+            var deviceType = DetermineDeviceType(probe);
+            var addr = NormalizeAddress(probe.ProbeAddress);
+            var cmdText = "{" + deviceType + addr + "HCA 0;2;0;" + refTemp + "}\r";
+            return new Command(cmdText, timeoutMs, "Save Temperature Test Point (HCA)");
+        }
+        public static Command TempTestPointAdjustCmd(RotProbe probe, int timeoutMs = 500)
+        {
+            if (probe == null)
+                throw new ArgumentNullException(nameof(probe));
+            var deviceType = DetermineDeviceType(probe);
+            var addr = NormalizeAddress(probe.ProbeAddress);
+            var cmdText = "{" + deviceType + addr + "HCA 0;2;1;;}\r";
+            return new Command(cmdText, timeoutMs, "Save Temperature Adjustment Values (HCA)");
+        }
+        public static Command TempTestPointFactoryCmd(RotProbe probe, int timeoutMs = 500)
+        {
+            if (probe == null)
+                throw new ArgumentNullException(nameof(probe));
+            var deviceType = DetermineDeviceType(probe);
+            var addr = NormalizeAddress(probe.ProbeAddress);
+            var cmdText = "{" + deviceType + addr + "HCA 0;2;2;;}\r";
+            return new Command(cmdText, timeoutMs, "Return Temperature To Factory Settings (HCA)");
+        }
+        public static Command TempTestPointDeleteCmd(RotProbe probe, int timeoutMs = 500)
+        {
+            if (probe == null)
+                throw new ArgumentNullException(nameof(probe));
+            var deviceType = DetermineDeviceType(probe);
+            var addr = NormalizeAddress(probe.ProbeAddress);
+            var cmdText = "{" + deviceType + addr + "HCA 0;2;3;;}\r";
+            return new Command(cmdText, timeoutMs, "Delete Temperature Test Point (HCA)");
         }
 
         /// <summary>
@@ -451,6 +488,7 @@ namespace Rotronic
             return SendCommandResponseInternal(probe, cmd, timeoutMs);
         }
 
+        
         // Public wrappers for the temperature coefficient / offset commands
 
         public static bool SendNewTemperatureCoeffA(RotProbe probe, double newCoeff, int timeoutMs = 500)
@@ -498,6 +536,56 @@ namespace Rotronic
         public static string SendNewTemperatureOffsetResponse(RotProbe probe, double newOffset, int timeoutMs = 500)
         {
             var cmd = NewTemperatureOffsetCmd(probe, newOffset, timeoutMs);
+            return SendCommandResponseInternal(probe, cmd, timeoutMs);
+        }
+
+        // Public wrappers for the temperature test point commands
+
+        public static bool SendTempTestPointSave(RotProbe probe, Mirror mirror, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointSaveCmd(probe, mirror, timeoutMs);
+            return SendCommandInternal(probe, cmd);
+        }
+
+        public static string SendTempTestPointSaveResponse(RotProbe probe, Mirror mirror, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointSaveCmd(probe, mirror, timeoutMs);
+            return SendCommandResponseInternal(probe, cmd, timeoutMs);
+        }
+
+        public static bool SendTempTestPointAdjust(RotProbe probe, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointAdjustCmd(probe, timeoutMs);
+            return SendCommandInternal(probe, cmd);
+        }
+
+        public static string SendTempTestPointAdjustResponse(RotProbe probe, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointAdjustCmd(probe, timeoutMs);
+            return SendCommandResponseInternal(probe, cmd, timeoutMs);
+        }
+
+        public static bool SendTempTestPointFactory(RotProbe probe, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointFactoryCmd(probe, timeoutMs);
+            return SendCommandInternal(probe, cmd);
+        }
+
+        public static string SendTempTestPointFactoryResponse(RotProbe probe, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointFactoryCmd(probe, timeoutMs);
+            return SendCommandResponseInternal(probe, cmd, timeoutMs);
+        }
+
+        public static bool SendTempTestPointDelete(RotProbe probe, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointDeleteCmd(probe, timeoutMs);
+            return SendCommandInternal(probe, cmd);
+        }
+
+        public static string SendTempTestPointDeleteResponse(RotProbe probe, int timeoutMs = 500)
+        {
+            var cmd = TempTestPointDeleteCmd(probe, timeoutMs);
             return SendCommandResponseInternal(probe, cmd, timeoutMs);
         }
 

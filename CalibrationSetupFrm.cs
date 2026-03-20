@@ -21,18 +21,15 @@ namespace Rotronic
         // Store steps passed from StepEditor
         private List<StepClass> _steps = new List<StepClass>();
 
-        private bool _advanceTemp = false;
-
         public CalibrationSetupFrm()
         {
             InitializeComponent();
         }
 
         // New constructor to accept steps
-        public CalibrationSetupFrm(List<StepClass> steps, bool advanceTemp) : this()
+        public CalibrationSetupFrm(List<StepClass> steps) : this()
         {
             _steps = steps ?? new List<StepClass>();
-            _advanceTemp = advanceTemp;
             // Optionally reflect step count in the form title
             try
             {
@@ -924,7 +921,7 @@ namespace Rotronic
             if (chamberObj != null)
                 chamberObj.InUse = true;
 
-            var calibrationProcess = new CalProgressFrm(selectedProbes, mirrorObj, chamberObj, _steps, checkBoxManual.Checked, _advanceTemp);
+            var calibrationProcess = new CalProgressFrm(selectedProbes, mirrorObj, chamberObj, _steps, checkBoxManual.Checked);
             calibrationProcess.FormClosed += (s, args) =>
             {
                 foreach (var p in selectedProbes)

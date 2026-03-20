@@ -68,28 +68,7 @@ namespace Rotronic
             dataGridViewStep.CellBeginEdit += DataGridViewStep_CellBeginEdit;
             dataGridViewStep.CellFormatting += DataGridViewStep_CellFormatting;
 
-            // New: enforce Advanced Temperature Adjustment UI rules
-            try
-            {
-                if (checkBoxAdvTemp != null)
-                    checkBoxAdvTemp.CheckedChanged += CheckBoxAdvTemp_CheckedChanged;
-            }
-            catch { }
             dataGridViewStep.CellContentClick += DataGridViewStep_CellContentClick;
-        }
-
-        private void CheckBoxAdvTemp_CheckedChanged(object sender, EventArgs e)
-        {
-            try
-            {
-                ApplyAdvancedTemperatureUiRulesToAllRows();
-            }
-            catch { }
-        }
-
-        private bool IsAdvancedTemperatureEnabled()
-        {
-            try { return checkBoxAdvTemp != null && checkBoxAdvTemp.Checked; } catch { return false; }
         }
 
         private int FindAdjustPointColumnIndex()
@@ -124,46 +103,6 @@ namespace Rotronic
             return string.Equals(s, "Temperature", StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool ShouldDisableAdjustPointForRow(int rowIndex)
-        {
-            return IsAdvancedTemperatureEnabled() && IsTemperatureStepRow(rowIndex);
-        }
-
-        private void ApplyAdvancedTemperatureUiRulesToRow(int rowIndex)
-        {
-            int adjCol = FindAdjustPointColumnIndex();
-            if (adjCol < 0)
-                return;
-
-            if (rowIndex < 0 || rowIndex >= dataGridViewStep.Rows.Count)
-                return;
-
-            if (dataGridViewStep.Rows[rowIndex].IsNewRow)
-                return;
-
-            var cell = dataGridViewStep.Rows[rowIndex].Cells[adjCol];
-            if (cell == null)
-                return;
-
-            bool disable = ShouldDisableAdjustPointForRow(rowIndex);
-            cell.ReadOnly = disable;
-            if (disable)
-                cell.Value = false;
-
-            try { dataGridViewStep.InvalidateCell(cell); } catch { }
-        }
-
-        private void ApplyAdvancedTemperatureUiRulesToAllRows()
-        {
-            for (int r = 0; r < dataGridViewStep.Rows.Count; r++)
-            {
-                if (dataGridViewStep.Rows[r].IsNewRow)
-                    continue;
-                ApplyAdvancedTemperatureUiRulesToRow(r);
-            }
-
-            try { dataGridViewStep.Invalidate(); } catch { }
-        }
 
         private int FindStepColumnIndex()
         {
@@ -181,21 +120,32 @@ namespace Rotronic
             return -1;
         }
 
-        private bool IsAdjustStepRow(int rowIndex)
+        private string GetStepText(int rowIndex)
         {
             if (rowIndex < 0 || rowIndex >= dataGridViewStep.Rows.Count)
-                return false;
+                return string.Empty;
 
             int stepCol = FindStepColumnIndex();
             if (stepCol < 0)
-                return false;
+                return string.Empty;
 
             var cellVal = dataGridViewStep.Rows[rowIndex].Cells[stepCol]?.Value;
-            var text = (cellVal?.ToString() ?? string.Empty).Trim();
-            return string.Equals(text, "Adjust", StringComparison.OrdinalIgnoreCase);
+            return (cellVal?.ToString() ?? string.Empty).Trim();
         }
 
-        private void ApplyAdjustRowState(int rowIndex)
+        private bool IsSpecialStepText(string stepText)
+        {
+            return string.Equals(stepText, "Adjust", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "AdvancedTempStart", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsSpecialStepRow(int rowIndex)
+        {
+            return IsSpecialStepText(GetStepText(rowIndex));
+        }
+
+        private void ApplySpecialRowState(int rowIndex)
         {
             if (rowIndex < 0 || rowIndex >= dataGridViewStep.Rows.Count)
                 return;
@@ -204,7 +154,7 @@ namespace Rotronic
             if (stepCol < 0)
                 return;
 
-            bool isAdjust = IsAdjustStepRow(rowIndex);
+            bool isSpecialStep = IsSpecialStepRow(rowIndex);
 
             var row = dataGridViewStep.Rows[rowIndex];
             for (int c = 0; c < dataGridViewStep.Columns.Count; c++)
@@ -216,9 +166,9 @@ namespace Rotronic
                 if (cell == null)
                     continue;
 
-                cell.ReadOnly = isAdjust;
+                cell.ReadOnly = isSpecialStep;
 
-                if (isAdjust)
+                if (isSpecialStep)
                 {
                     // Clear values and uncheck checkboxes.
                     if (cell is DataGridViewCheckBoxCell)
@@ -295,10 +245,8 @@ namespace Rotronic
                 // If the Step column changes, enforce Adjust-row behavior.
                 if (colIndex == FindStepColumnIndex())
                 {
-                    ApplyAdjustRowState(rowIndex);
+                    ApplySpecialRowState(rowIndex);
 
-                    // Also re-apply Advanced Temperature rule since this row's step type changed.
-                    ApplyAdvancedTemperatureUiRulesToRow(rowIndex);
                 }
             }
         }
@@ -312,18 +260,12 @@ namespace Rotronic
             if (stepCol < 0)
                 return;
 
-            // If this row is an Adjust step, block editing of all non-step cells.
-            if (e.ColumnIndex != stepCol && IsAdjustStepRow(e.RowIndex))
+            // If this row is a special step, block editing of all non-step cells.
+            if (e.ColumnIndex != stepCol && IsSpecialStepRow(e.RowIndex))
             {
                 e.Cancel = true;
             }
 
-            // If Advanced Temperature Adjustment is enabled, prevent editing the adjustment-point checkbox on Temperature rows.
-            int adjCol = FindAdjustPointColumnIndex();
-            if (adjCol >= 0 && e.ColumnIndex == adjCol && ShouldDisableAdjustPointForRow(e.RowIndex))
-            {
-                e.Cancel = true;
-            }
         }
 
         private void DataGridViewStep_CellContentClick(object sender, DataGridViewCellEventArgs e)
@@ -332,16 +274,6 @@ namespace Rotronic
             if (e.RowIndex < 0 || e.ColumnIndex < 0)
                 return;
 
-            int adjCol = FindAdjustPointColumnIndex();
-            if (adjCol >= 0 && e.ColumnIndex == adjCol && ShouldDisableAdjustPointForRow(e.RowIndex))
-            {
-                try
-                {
-                    dataGridViewStep.Rows[e.RowIndex].Cells[e.ColumnIndex].Value = false;
-                    dataGridViewStep.EndEdit();
-                }
-                catch { }
-            }
         }
 
         private void DataGridViewStep_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
@@ -356,19 +288,17 @@ namespace Rotronic
             if (e.ColumnIndex == stepCol)
                 return;
 
-            if (IsAdjustStepRow(e.RowIndex))
+            if (IsSpecialStepRow(e.RowIndex))
             {
                 e.CellStyle.BackColor = SystemColors.Control;
                 e.CellStyle.ForeColor = SystemColors.GrayText;
+            }
+            else
+            {
+                e.CellStyle.BackColor = dataGridViewStep.DefaultCellStyle.BackColor;
+                e.CellStyle.ForeColor = dataGridViewStep.DefaultCellStyle.ForeColor;
             }
 
-            // Advanced Temperature Adjustment: disable/grey-out Adjustment Point cell for Temperature rows.
-            int adjCol = FindAdjustPointColumnIndex();
-            if (adjCol >= 0 && e.ColumnIndex == adjCol && ShouldDisableAdjustPointForRow(e.RowIndex))
-            {
-                e.CellStyle.BackColor = SystemColors.Control;
-                e.CellStyle.ForeColor = SystemColors.GrayText;
-            }
         }
 
         private void DataGridViewStep_CurrentCellDirtyStateChanged(object sender, EventArgs e)
@@ -504,54 +434,6 @@ namespace Rotronic
                 return;
             }
 
-            // Additional rule: Advanced Temperature Adjustment requires at least 4 Temperature steps.
-            try
-            {
-                if (checkBoxAdvTemp != null && checkBoxAdvTemp.Checked)
-                {
-                    int colStep = -1;
-                    for (int i = 0; i < dataGridViewStep.Columns.Count; i++)
-                    {
-                        var c = dataGridViewStep.Columns[i];
-                        string combined = ((c?.Name ?? "") + "|" + (c?.HeaderText ?? "")).ToLowerInvariant();
-                        if (combined.Contains("step"))
-                        {
-                            colStep = i;
-                            break;
-                        }
-                    }
-
-                    if (colStep >= 0)
-                    {
-                        int tempSteps = 0;
-                        for (int r = 0; r < dataGridViewStep.Rows.Count; r++)
-                        {
-                            var row = dataGridViewStep.Rows[r];
-                            if (row == null || row.IsNewRow)
-                                continue;
-
-                            var v = row.Cells[colStep]?.Value;
-                            var s = (v?.ToString() ?? string.Empty).Trim();
-                            if (string.Equals(s, "Temperature", StringComparison.OrdinalIgnoreCase))
-                                tempSteps++;
-                        }
-
-                        if (tempSteps < 4)
-                        {
-                            MessageBox.Show(this,
-                                "Advanced Temperature Adjustment requires at least 4 Temperature steps in the list.",
-                                "Validation",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Warning);
-                            return;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // ignore unexpected validation errors
-            }
             // Determine application exe folder and ensure "Step Files" subfolder exists
             string exeFolder = Application.StartupPath; // safe for WinForms
             string stepFilesFolder = Path.Combine(exeFolder, "Step Files");
@@ -708,6 +590,9 @@ namespace Rotronic
 
             var errors = new List<string>();
             DataGridViewCell firstInvalidCell = null;
+            int advancedTempStartCount = 0;
+            int advancedTempEndCount = 0;
+            DataGridViewCell firstAdvancedTempStartCell = null;
 
             for (int rowIndex = 0; rowIndex < dataGridViewStep.Rows.Count; rowIndex++)
             {
@@ -715,17 +600,28 @@ namespace Rotronic
                 if (row.IsNewRow)
                     continue;
 
-                bool isAdjustRow = false;
+                bool isSpecialStepRow = false;
+                string stepText = string.Empty;
                 try
                 {
                     if (colStep >= 0)
                     {
                         var stepVal = row.Cells[colStep]?.Value;
-                        var stepText = (stepVal?.ToString() ?? string.Empty).Trim();
-                        isAdjustRow = string.Equals(stepText, "Adjust", StringComparison.OrdinalIgnoreCase);
+                        stepText = (stepVal?.ToString() ?? string.Empty).Trim();
+                        isSpecialStepRow = IsSpecialStepText(stepText);
+
+                        if (string.Equals(stepText, "AdvancedTempStart", StringComparison.OrdinalIgnoreCase))
+                        {
+                            advancedTempStartCount++;
+                            if (firstAdvancedTempStartCell == null)
+                                firstAdvancedTempStartCell = row.Cells[colStep];
+                        }
+
+                        if (string.Equals(stepText, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase))
+                            advancedTempEndCount++;
                     }
                 }
-                catch { isAdjustRow = false; }
+                catch { isSpecialStepRow = false; }
 
                 // Clear any previous error texts on this row's cells (we'll set if needed)
                 foreach (DataGridViewCell c in row.Cells)
@@ -752,7 +648,7 @@ namespace Rotronic
                     var raw = cell?.Value?.ToString() ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(raw))
                     {
-                        if (!isAdjustRow)
+                        if (!isSpecialStepRow)
                         {
                             string msg = $"Row {rowIndex + 1}: Temperature set point is empty or invalid.";
                             errors.Add(msg);
@@ -788,7 +684,7 @@ namespace Rotronic
                     var raw = cell?.Value?.ToString() ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(raw))
                     {
-                        if (!isAdjustRow)
+                        if (!isSpecialStepRow)
                         {
                             string msg = $"Row {rowIndex + 1}: Humidity set point is empty or invalid.";
                             errors.Add(msg);
@@ -925,6 +821,24 @@ namespace Rotronic
                 }
             } // end rows loop
 
+            if (advancedTempStartCount > 1)
+            {
+                errors.Add("Only one AdvancedTempStart step is allowed.");
+                if (firstInvalidCell == null)
+                    firstInvalidCell = firstAdvancedTempStartCell;
+                if (firstAdvancedTempStartCell != null)
+                    firstAdvancedTempStartCell.ErrorText = "Only one AdvancedTempStart is allowed";
+            }
+
+            if (advancedTempStartCount > 0 && advancedTempEndCount == 0)
+            {
+                errors.Add("Every AdvancedTempStart step must have a matching AdvancedTempEnd step.");
+                if (firstInvalidCell == null)
+                    firstInvalidCell = firstAdvancedTempStartCell;
+                if (firstAdvancedTempStartCell != null)
+                    firstAdvancedTempStartCell.ErrorText = "AdvancedTempEnd is required";
+            }
+
             if (errors.Count > 0)
             {
                 try
@@ -1011,40 +925,6 @@ namespace Rotronic
                 }
 
                 workbookPart.Workbook.Save();
-
-                // --- Sheet 2: Settings (Advanced Temperature Adjustment checkbox) ---
-                try
-                {
-                    WorksheetPart settingsPart = workbookPart.AddNewPart<WorksheetPart>();
-                    var settingsData = new SheetData();
-                    settingsPart.Worksheet = new Worksheet(settingsData);
-
-                    var settingsSheet = new Sheet()
-                    {
-                        Id = document.WorkbookPart.GetIdOfPart(settingsPart),
-                        SheetId = 2,
-                        Name = "Settings"
-                    };
-                    sheets.Append(settingsSheet);
-
-                    // Header
-                    var settingsHeaderRow = new Row();
-                    settingsHeaderRow.Append(CreateTextCell("AdvTemp"));
-                    settingsData.Append(settingsHeaderRow);
-
-                    // Value row
-                    var settingsValueRow = new Row();
-                    bool adv = false;
-                    try { adv = (checkBoxAdvTemp != null && checkBoxAdvTemp.Checked); } catch { adv = false; }
-                    settingsValueRow.Append(CreateTextCell(adv ? "True" : "False"));
-                    settingsData.Append(settingsValueRow);
-
-                    workbookPart.Workbook.Save();
-                }
-                catch
-                {
-                    // ignore settings export failures; step list itself should still be usable
-                }
             }
         }
 
@@ -1300,36 +1180,6 @@ namespace Rotronic
                                 targetTable.Rows.Add(newRow);
                             }
 
-                        // Restore Settings sheet (optional, for backward compatibility)
-                        try
-                        {
-                            Sheet settingsSheet = workbookPart.Workbook.Sheets.Elements<Sheet>().FirstOrDefault(s => string.Equals(s.Name?.Value, "Settings", StringComparison.OrdinalIgnoreCase));
-                            if (settingsSheet != null)
-                            {
-                                WorksheetPart settingsPart = (WorksheetPart)workbookPart.GetPartById(settingsSheet.Id);
-                                var settingsData = settingsPart.Worksheet.GetFirstChild<SheetData>();
-                                var settingsRows = settingsData?.Elements<Row>().ToList() ?? new List<Row>();
-                                if (settingsRows.Count >= 2)
-                                {
-                                    // We always expect first col to be AdvTemp in this version
-                                    var valueCell = settingsRows[1].Elements<Cell>().FirstOrDefault();
-                                    var raw = ReadCell(valueCell);
-                                    bool adv = false;
-                                    if (!string.IsNullOrWhiteSpace(raw))
-                                    {
-                                        var t = raw.Trim();
-                                        if (bool.TryParse(t, out var b)) adv = b;
-                                        else if (t == "1") adv = true;
-                                        else if (string.Equals(t, "yes", StringComparison.OrdinalIgnoreCase)) adv = true;
-                                    }
-                                    try { if (checkBoxAdvTemp != null) checkBoxAdvTemp.Checked = adv; } catch { }
-                                }
-                            }
-                        }
-                        catch
-                        {
-                            // ignore settings load failures
-                        }
                         }
                     }
                 }
@@ -1591,11 +1441,9 @@ namespace Rotronic
                 MessageBox.Show(this, "No step file is loaded", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            var advancedTemp = checkBoxAdvTemp.Checked;
-
             // Build list of StepClass objects from the grid and pass to CalibrationSetupFrm
             var steps = BuildStepListFromGrid();
-            var calForm = new CalibrationSetupFrm(steps, advancedTemp);
+            var calForm = new CalibrationSetupFrm(steps);
             calForm.Show(this);
         }
     }

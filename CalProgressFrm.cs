@@ -21,7 +21,6 @@ namespace Rotronic
         private readonly Chamber _selectedChamber;
         private readonly List<StepClass> _steps;
         private readonly bool _manual;
-        private readonly bool _advancedTemp;
 
         private readonly Timer _uiRefreshTimer = new Timer();
 
@@ -42,6 +41,7 @@ namespace Rotronic
 
         private readonly Dictionary<string, Dictionary<int, StepTiming>> _stepTimingsByCalibration
             = new Dictionary<string, Dictionary<int, StepTiming>>(StringComparer.Ordinal);
+        private readonly bool warning = false;
 
         private sealed class StepTiming
         {
@@ -76,10 +76,19 @@ namespace Rotronic
             public double? ChamberHumiditySetpoint { get; set; }
         }
 
+        public CalProgressFrm()
+            : this(new List<RotProbe>(), null, null, new List<StepClass>(), false)
+        {
+        }
 
-        public CalProgressFrm(List<RotProbe> selectedProbes, Mirror selectedMirror, Chamber selectedChamber, List<StepClass> steps, bool manual, bool advancedTemp)
+
+        public CalProgressFrm(List<RotProbe> selectedProbes, Mirror selectedMirror, Chamber selectedChamber, List<StepClass> steps, bool manual)
         {
             InitializeComponent();
+
+            if (LicenseManager.UsageMode == LicenseUsageMode.Designtime)
+                return;
+
             this.FormClosed += CalProgressFrm_FormClosed;
 
             _selectedProbes = selectedProbes ?? new List<RotProbe>();
@@ -88,7 +97,6 @@ namespace Rotronic
 
             _steps = steps ?? new List<StepClass>();
             _manual = manual;
-            _advancedTemp = advancedTemp;
 
             PopulateProbeComboBox();
 
@@ -1364,6 +1372,131 @@ INSERT INTO Chamber (
             return value.ToString("o", CultureInfo.InvariantCulture);
         }
 
+        public bool Warning()
+        {
+            var result = MessageBox.Show("This will save any adjustment points to the probe's internal memory. Do you want to proceed?", "Confirm Probe Adjustment", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (result == DialogResult.Yes)
+                return true;
+            return false;
+
+        }
+
+        public void AdvancedTemperatureAdjust(int IndexStart, int IndexEnd, RotProbe probe)
+        {
+            if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber))
+                return;
+
+            if (IndexEnd < IndexStart)
+                return;
+
+            var startStepNumber = IndexStart + 1;
+            var endStepNumber = IndexEnd + 1;
+
+            double[] MirrorTemp = Array.Empty<double>();
+            double[] ExternalTemp = Array.Empty<double>();
+            double[] ProbeTemp = Array.Empty<double>();
+            double[] ProbeTempCount = Array.Empty<double>();
+            double[] ProbeResistance = Array.Empty<double>();
+
+            /*query database using RotProbe serial number or other appropriate input to get last calibrationID associated with the probe (should be current calibration being done)
+             * -> query for probe, find last cal ID, join to steps table by calibrationID join to sample table by StepID.
+            Index start should correspond to stepID where advanced temperature data starts, and index end should correspond to stepID where advanced temperature data ends.
+            relavent data for each sample is ProbeTemperatureC, ProbeTemperatureCount, ProbeTemperatureResistance, ExternalTemperatureC, MirrorTemperatureC
+
+            For each series of five samples corresponding to each step, average each value. Use the averaged values in subsequent calculations
+
+            pseudocode:
+                   query results for step/samples
+                   for each series of samples in the step
+                        calculate average probe temp, average probe temp count, average probe resistance, average mirror temp, average external temp
+                            assign average values to arrays (i.e. MirrorTemp[0] = average mirror temp for step 1, MirrorTemp[1] = average mirror temp for step 2, etc.) - step index may not start at 0 from database
+                            but we don't need to get the step index back out of this method.
+
+            */
+
+
+            //TODO possible correction accross code base. MirrorTemp and ExternalTemp are being used interchangeably, incorrectly. ExternalTemp is the prt for the mirror, mirror temp is the
+            //mirrors internal temp, which determines the reported dew/frost point... for right now continue to use MirrorTemp as the "reference" temperature. Will fix and make consistnent in future update.
+
+            try
+            {
+                var dbPath = Data.GetDatabasePath();
+                var connStr = string.Format(CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+                using (var conn = new SQLiteConnection(connStr))
+                {
+                    conn.Open();
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+WITH CurrentCalibration AS (
+    SELECT CalibrationId
+    FROM Calibration
+    WHERE ProbeSerialNumber = @ProbeSerialNumber
+    ORDER BY StartedUtc DESC
+    LIMIT 1
+)
+SELECT
+    s.StepNumber,
+    AVG(sa.MirrorTemperatureC) AS AvgMirrorTemperatureC,
+    AVG(sa.ExternalTemperatureC) AS AvgExternalTemperatureC,
+    AVG(sa.ProbeTemperatureC) AS AvgProbeTemperatureC,
+    AVG(sa.ProbeTemperatureCount) AS AvgProbeTemperatureCount,
+    AVG(sa.ProbeResistance) AS AvgProbeResistance
+FROM CurrentCalibration cc
+JOIN Step s ON s.CalibrationId = cc.CalibrationId
+JOIN Sample sa ON sa.StepId = s.StepId
+WHERE s.StepNumber BETWEEN @StartStepNumber AND @EndStepNumber
+GROUP BY s.StepId, s.StepNumber
+ORDER BY s.StepNumber;";
+
+                        cmd.Parameters.AddWithValue("@ProbeSerialNumber", probe.SerialNumber);
+                        cmd.Parameters.AddWithValue("@StartStepNumber", startStepNumber);
+                        cmd.Parameters.AddWithValue("@EndStepNumber", endStepNumber);
+
+                        var mirrorTemps = new List<double>();
+                        var externalTemps = new List<double>();
+                        var probeTemps = new List<double>();
+                        var probeTempCounts = new List<double>();
+                        var probeResistances = new List<double>();
+
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                mirrorTemps.Add(reader["AvgMirrorTemperatureC"] == DBNull.Value ? double.NaN : Convert.ToDouble(reader["AvgMirrorTemperatureC"], CultureInfo.InvariantCulture));
+                                externalTemps.Add(reader["AvgExternalTemperatureC"] == DBNull.Value ? double.NaN : Convert.ToDouble(reader["AvgExternalTemperatureC"], CultureInfo.InvariantCulture));
+                                probeTemps.Add(reader["AvgProbeTemperatureC"] == DBNull.Value ? double.NaN : Convert.ToDouble(reader["AvgProbeTemperatureC"], CultureInfo.InvariantCulture));
+                                probeTempCounts.Add(reader["AvgProbeTemperatureCount"] == DBNull.Value ? double.NaN : Convert.ToDouble(reader["AvgProbeTemperatureCount"], CultureInfo.InvariantCulture));
+                                probeResistances.Add(reader["AvgProbeResistance"] == DBNull.Value ? double.NaN : Convert.ToDouble(reader["AvgProbeResistance"], CultureInfo.InvariantCulture));
+                            }
+                        }
+
+                        MirrorTemp = mirrorTemps.ToArray();
+                        ExternalTemp = externalTemps.ToArray();
+                        ProbeTemp = probeTemps.ToArray();
+                        ProbeTempCount = probeTempCounts.ToArray();
+                        ProbeResistance = probeResistances.ToArray();
+
+                        TemperatureCalculator(ProbeTemp, ProbeTempCount, ProbeResistance, MirrorTemp, probe);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to query advanced temperature adjustment data: " + ex.Message, "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+        }
+
+        public void TemperatureCalculator(double[] probeTemp, double[] probeTempCount, double[] probeResistance, double[] mirrorTemp, RotProbe probe)
+        {
+            //TODO implement advanced temperature adjustment calculation logic here. Will likely need to reference scientific literature and may require significant code to implement.
+            //Once calculated, write new coefficients/offsets to probe using appropriate commands.
+        }
+
         public void StartCalRoutine(List<RotProbe> rotProbes, Mirror mirror, Chamber chamber, List<StepClass> steps)
         {
             _calibrationRunning = true;
@@ -1372,7 +1505,8 @@ INSERT INTO Chamber (
             //1) foreach probe -> record initial probe data
             //2) record initial mirror data once
             //3) record initial chamber data once
-
+            int endIndex = 0;
+            int startIndex = 0;
             if (rotProbes != null)
             {
                 foreach (var probe in rotProbes)
@@ -1405,6 +1539,36 @@ INSERT INTO Chamber (
             {
                 var step = steps[stepIndex];
                 var stepNumber = stepIndex + 1;
+
+                // Handle "Adjust" step: save humidity and temperature adjustments to probe
+                if (string.Equals(step.Step, "Adjust", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var probe in rotProbes)
+                    {
+                        if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+                        RotProbeCommands.SendHumiditySaveAdjust(probe);
+                        RotProbeCommands.SendTempTestPointAdjust(probe);
+                    }
+                    // Skip normal calibration processing for this step
+                    continue;
+                }
+                if (string.Equals(step.Step, "AdvancedTempStart", StringComparison.OrdinalIgnoreCase))
+                {
+                    // note index number (or probably next index number since this is a marker step) for advanced temperature step
+                    startIndex = stepIndex + 1;
+                    continue;
+                }
+                if (string.Equals(step.Step, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var probe in rotProbes)
+                    {
+                        var calibrationID = calibrationIdByProbeSerial.TryGetValue(probe.SerialNumber, out var id) ? id : null;
+                        // note index number for end of advanced temperature step block. Logic for advanced temp adjustment will likely need to reference both start and end step numbers to know which steps to pull data from for calculations.
+                        endIndex = stepIndex - 1;
+                        AdvancedTemperatureAdjust(startIndex, endIndex, probe);
+                    }
+                    continue;
+                }
 
                 var rampStartUtc = DateTime.UtcNow;
                 foreach (var calId in calibrationIdByProbeSerial.Values)
@@ -1457,6 +1621,38 @@ INSERT INTO Chamber (
                 }
 
                 EndSamplingUi();
+
+                // Handle adjustment logic at end of sampling
+                if (step.Adjust)
+                {
+                    if (string.Equals(step.Step, "Humidity", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Save humidity test point with reference value from mirror
+                        foreach (var probe in rotProbes)
+                        {
+                            if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+                            RotProbeCommands.SendHumidityTestPointSave(probe, mirror);
+                        }
+                    }
+                    else if (string.Equals(step.Step, "Temperature", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Save temperature test point with reference value from mirror
+                        foreach (var probe in rotProbes)
+                        {
+                            if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+                            RotProbeCommands.SendTempTestPointSave(probe, mirror);
+                        }
+                    }
+                }
+
+                // TODO: Advanced temperature adjustment placeholder
+                // if (_advancedTempAdjust)
+                // {
+                //     Logic would be kind of complicated as it spans multiple steps.
+                //     First block of steps must be temperature steps (i.e. 4-5 temperature steps in a row).
+                //     Collect temp of reference, resistance of probe, calculate coefficients and offset
+                //     Write to probe using special commands/binary interface
+                // }
 
                 // Flush buffered samples to DB (one transaction). This keeps UI responsive by offloading work.
                 var stepCopy = step;

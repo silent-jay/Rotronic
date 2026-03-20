@@ -90,7 +90,7 @@
     <Compile Include="ChamberOptions.Designer.cs">
       <DependentUpon>ChamberOptions.cs</DependentUpon>
     </Compile>
-    <Compile Include="Commands.cs" />
+    <Compile Include="RotProbeCommands.cs" />
     <Compile Include="Data.cs" />
     <Compile Include="HeaderOptions.cs" />
     <Compile Include="IPConfigFrm.cs">

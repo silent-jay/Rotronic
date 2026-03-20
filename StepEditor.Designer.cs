@@ -46,7 +46,6 @@
             this.label6 = new System.Windows.Forms.Label();
             this.label7 = new System.Windows.Forms.Label();
             this.label8 = new System.Windows.Forms.Label();
-            this.checkBoxAdvTemp = new System.Windows.Forms.CheckBox();
             this.Step = new System.Windows.Forms.DataGridViewComboBoxColumn();
             this.SetPointRH = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.SetPointTemp = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -230,23 +229,15 @@
     "ded after performing a single point temperature adjustment, or after a series of" +
     " humidity adjustments";
             // 
-            // checkBoxAdvTemp
-            // 
-            this.checkBoxAdvTemp.AutoSize = true;
-            this.checkBoxAdvTemp.Location = new System.Drawing.Point(229, 711);
-            this.checkBoxAdvTemp.Name = "checkBoxAdvTemp";
-            this.checkBoxAdvTemp.Size = new System.Drawing.Size(286, 24);
-            this.checkBoxAdvTemp.TabIndex = 28;
-            this.checkBoxAdvTemp.Text = "Advanced Temperature Adjustment";
-            this.checkBoxAdvTemp.UseVisualStyleBackColor = true;
-            // 
             // Step
             // 
             this.Step.HeaderText = "Step";
             this.Step.Items.AddRange(new object[] {
             "Humidity",
             "Temperature",
-            "Adjust"});
+            "Adjust",
+            "AdvancedTempStart",
+            "AdvancedTempEnd"});
             this.Step.MinimumWidth = 8;
             this.Step.Name = "Step";
             this.Step.Width = 250;
@@ -300,7 +291,6 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(2017, 902);
-            this.Controls.Add(this.checkBoxAdvTemp);
             this.Controls.Add(this.label8);
             this.Controls.Add(this.label7);
             this.Controls.Add(this.label6);
@@ -339,7 +329,6 @@
         private System.Windows.Forms.Label label6;
         private System.Windows.Forms.Label label7;
         private System.Windows.Forms.Label label8;
-        private System.Windows.Forms.CheckBox checkBoxAdvTemp;
         private System.Windows.Forms.DataGridViewComboBoxColumn Step;
         private System.Windows.Forms.DataGridViewTextBoxColumn SetPointRH;
         private System.Windows.Forms.DataGridViewTextBoxColumn SetPointTemp;

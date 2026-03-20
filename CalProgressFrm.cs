@@ -6,6 +6,7 @@ using System.Data.SQLite;
 using System.Drawing;
 using System.Linq;
 using System.Text;
+using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -24,9 +25,56 @@ namespace Rotronic
 
         private readonly Timer _uiRefreshTimer = new Timer();
 
+        private readonly Timer _gridRefreshTimer = new Timer();
+        private volatile bool _calibrationRunning = false;
+
+        private readonly Timer _samplingCountdownTimer = new Timer();
+        private volatile bool _samplingInProgress = false;
+        private DateTime _samplingEndUtc;
+        private string _buttonTextBeforeSampling;
+
         private Timer _soakTimer;
         private TimeSpan _soakRemaining = TimeSpan.Zero;
         private volatile bool _soakSkipRequested = false;
+
+        private readonly Dictionary<string, Dictionary<int, int>> _stepIdByCalibrationAndStepNumber
+            = new Dictionary<string, Dictionary<int, int>>(StringComparer.Ordinal);
+
+        private readonly Dictionary<string, Dictionary<int, StepTiming>> _stepTimingsByCalibration
+            = new Dictionary<string, Dictionary<int, StepTiming>>(StringComparer.Ordinal);
+
+        private sealed class StepTiming
+        {
+            public DateTime? RampStartUtc { get; set; }
+            public DateTime? SoakStartUtc { get; set; }
+            public DateTime? SoakEndUtc { get; set; }
+        }
+
+        private sealed class SampleRecord
+        {
+            public int StepNumber { get; set; }
+            public DateTime SampleUtc { get; set; }
+
+            public string ProbeSerialNumber { get; set; }
+
+            public double? ProbeHumidity { get; set; }
+            public int? ProbeHumidityCount { get; set; }
+            public double? ProbeHumidityRaw { get; set; }
+            public double? ProbeTemperatureC { get; set; }
+            public int? ProbeTemperatureCount { get; set; }
+            public double? ProbeResistance { get; set; }
+
+            public double? MirrorDewPointC { get; set; }
+            public double? MirrorFrostPointC { get; set; }
+            public double? MirrorHumidity { get; set; }
+            public double? ExternalTemperatureC { get; set; }
+            public double? MirrorTemperatureC { get; set; }
+
+            public double? ChamberTemperatureC { get; set; }
+            public double? ChamberTemperatureSetpointC { get; set; }
+            public double? ChamberHumidity { get; set; }
+            public double? ChamberHumiditySetpoint { get; set; }
+        }
 
 
         public CalProgressFrm(List<RotProbe> selectedProbes, Mirror selectedMirror, Chamber selectedChamber, List<StepClass> steps, bool manual, bool advancedTemp)
@@ -60,6 +108,13 @@ namespace Rotronic
             _uiRefreshTimer.Interval = 500;
             _uiRefreshTimer.Tick += (s, e) => RefreshLiveReadings();
             _uiRefreshTimer.Start();
+
+            comboBoxRotProbe.SelectedIndexChanged += (s, e) => RefreshCalProgressGrid();
+
+            // Grid is refreshed on explicit DB flush events to avoid scroll resets.
+
+            _samplingCountdownTimer.Interval = 250;
+            _samplingCountdownTimer.Tick += (s, e) => UpdateSamplingUi();
 
             /*
              * General plan for calibration procedures and UI/UX features to implement:
@@ -176,6 +231,76 @@ namespace Rotronic
             }
         }
 
+        private void RefreshCalProgressGrid()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)RefreshCalProgressGrid);
+                return;
+            }
+
+            var selected = comboBoxRotProbe.SelectedItem as ProbeComboItem;
+            var probe = selected != null ? selected.Probe : null;
+            var sn = probe != null ? probe.SerialNumber : null;
+
+            if (string.IsNullOrWhiteSpace(sn))
+            {
+                dataGridViewCalProgress.DataSource = null;
+                return;
+            }
+
+            try
+            {
+                var dbPath = Data.GetDatabasePath();
+                var connStr = string.Format(CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+                using (var conn = new SQLiteConnection(connStr))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+WITH CurrentCalibration AS (
+    SELECT CalibrationId
+    FROM Calibration
+    WHERE ProbeSerialNumber = @sn
+    ORDER BY StartedUtc DESC
+    LIMIT 1
+)
+SELECT
+    sa.SampleUtc AS [Sample Time],
+    s.StepNumber,
+    s.HumiditySetpoint AS [Humidity Setpoint],
+    sa.ProbeHumidity AS [Probe Humidity],
+    sa.MirrorHumidity AS [Mirror Humidity],
+    sa.ChamberHumidity AS [Chamber Humidity],
+    s.TemperatureSetpointC AS [Temperature Set Point],
+    sa.ProbeTemperatureC AS [Probe Temperature],
+    sa.MirrorTemperatureC AS [Mirror Temperature],
+    sa.ChamberTemperatureC AS [Chamber Temperature]
+FROM CurrentCalibration cc
+JOIN Step s ON s.CalibrationId = cc.CalibrationId
+JOIN Sample sa ON sa.StepId = s.StepId
+ORDER BY sa.SampleUtc ASC;";
+                        cmd.Parameters.AddWithValue("@sn", sn);
+
+                        using (var adapter = new SQLiteDataAdapter(cmd))
+                        {
+                            var dt = new DataTable();
+                            adapter.Fill(dt);
+                            dataGridViewCalProgress.DataSource = dt;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore transient read errors while DB is being written.
+            }
+        }
+
         private static void PaintIndicatorCircle(object sender, PaintEventArgs e)
         {
             var panel = sender as Panel;
@@ -211,6 +336,12 @@ namespace Rotronic
             _uiRefreshTimer.Stop();
             _uiRefreshTimer.Dispose();
 
+            _gridRefreshTimer.Stop();
+            _gridRefreshTimer.Dispose();
+
+            _samplingCountdownTimer.Stop();
+            _samplingCountdownTimer.Dispose();
+
             SkipSoakTimer();
 
             if (_selectedChamber != null)
@@ -240,15 +371,109 @@ namespace Rotronic
                 RefreshStabilityIndicators();
             }
         }
-        public void DataRecorder(RotProbe probe, Mirror mirror, Chamber chamber, StepClass step, string calibrationID)
+        private void DataRecorder(RotProbe probe, Mirror mirror, Chamber chamber, StepClass step, string calibrationID, int stepNumber, StepTiming timing, List<SampleRecord> bufferedSamples)
         {
-            /* PSEUDOCODE / PLAN (detailed)
-             * Write  a new record to 
-             * 
-             */
+            if (probe == null || bufferedSamples == null)
+                return;
+
+            var rec = new SampleRecord
+            {
+                StepNumber = stepNumber,
+                SampleUtc = DateTime.UtcNow,
+                ProbeSerialNumber = probe.SerialNumber,
+
+                ProbeHumidity = probe.Humidity,
+                ProbeHumidityCount = probe.HumidityCount,
+                ProbeHumidityRaw = probe.HumdityRaw,
+                ProbeTemperatureC = probe.Temperature,
+                ProbeTemperatureCount = probe.TemperatureCount,
+                ProbeResistance = probe.Resistance,
+
+                MirrorDewPointC = mirror != null ? (double?)mirror.DewPoint : null,
+                MirrorFrostPointC = mirror != null ? (double?)mirror.FrostPoint : null,
+                MirrorHumidity = mirror != null ? (double?)mirror.Humdity : null,
+                ExternalTemperatureC = mirror != null ? (double?)mirror.ExternalTemp : null,
+                MirrorTemperatureC = mirror != null ? (double?)mirror.MirrorTemp : null,
+
+                ChamberTemperatureC = chamber != null ? (double?)chamber.Temperature : null,
+                ChamberTemperatureSetpointC = chamber != null ? (double?)chamber.TemperatureSP : null,
+                ChamberHumidity = chamber != null ? (double?)chamber.Humidity : null,
+                ChamberHumiditySetpoint = chamber != null ? (double?)chamber.HumiditySP : null
+            };
+
+            bufferedSamples.Add(rec);
         }
 
-        public string DataRecorderSnapShotStart(RotProbe probe, Mirror mirror, Chamber chamber, StepClass step)
+        private void BeginSamplingUi(TimeSpan duration)
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)(() => BeginSamplingUi(duration)));
+                return;
+            }
+
+            _samplingInProgress = true;
+            _samplingEndUtc = DateTime.UtcNow.Add(duration);
+
+            _buttonTextBeforeSampling = button1.Text;
+            button1.Enabled = false;
+            button1.Text = "Sampling...";
+
+            textBoxSoak.ReadOnly = true;
+            textBoxSoak.TabStop = false;
+
+            UpdateSamplingUi();
+            _samplingCountdownTimer.Start();
+        }
+
+        private void EndSamplingUi()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)EndSamplingUi);
+                return;
+            }
+
+            _samplingInProgress = false;
+            _samplingCountdownTimer.Stop();
+
+            if (_calibrationRunning)
+            {
+                button1.Text = "Skip Soak";
+                button1.Enabled = true;
+            }
+            else
+            {
+                button1.Text = string.IsNullOrWhiteSpace(_buttonTextBeforeSampling) ? "Start Calibration" : _buttonTextBeforeSampling;
+                button1.Enabled = true;
+            }
+        }
+
+        private void UpdateSamplingUi()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)UpdateSamplingUi);
+                return;
+            }
+
+            if (!_samplingInProgress)
+                return;
+
+            var remaining = _samplingEndUtc - DateTime.UtcNow;
+            if (remaining < TimeSpan.Zero)
+                remaining = TimeSpan.Zero;
+
+            textBoxSoak.Text = string.Format(CultureInfo.InvariantCulture, "{0:D2}:{1:D2}", (int)remaining.TotalMinutes, remaining.Seconds);
+        }
+
+        public string DataRecorderSnapShotStart(RotProbe probe, Mirror mirror, Chamber chamber)
         {
             /*
              * PSEUDOCODE / PLAN (detailed)
@@ -284,16 +509,154 @@ namespace Rotronic
 
             string calibrationID = timestamp + index.ToString("D2", System.Globalization.CultureInfo.InvariantCulture);
 
-            /* Record JSON snapshot of calibration constants, probe name mirror, chamber calibration dates as outline in database design docs
-             * 
-             */
+            var startedUtcIso = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+
+            string probeSnapshotStartJson = null;
+            if (probe != null)
+            {
+                probeSnapshotStartJson = "{"
+                    + "\"ProbeType\":" + ToJsonString(probe.ProbeType) + ","
+                    + "\"HumidityFactoryCorrection\":" + ToJsonNumber(probe.HumidityFactoryCorrection) + ","
+                    + "\"HumidityUserCorrection\":" + ToJsonNumber(probe.HumidityUserCorrection) + ","
+                    + "\"HumidityTemperatureCorrection\":" + ToJsonNumber(probe.HumidityTemperatureCorrection) + ","
+                    + "\"HumidityDriftCorrection\":" + ToJsonNumber(probe.HumidityDriftCorrection) + ","
+                    + "\"PT100CoeffA\":" + ToJsonNumber(probe.PT100CoeffA) + ","
+                    + "\"PT100CoeffB\":" + ToJsonNumber(probe.PT100CoeffB) + ","
+                    + "\"PT100CoeffC\":" + ToJsonNumber(probe.PT100CoeffC) + ","
+                    + "\"TempOffset\":" + ToJsonNumber(probe.TempOffset) + ","
+                    + "\"TempConversion\":" + ToJsonNumber(probe.TempConversion) + ","
+                    + "\"DeviceModel\":" + ToJsonString(probe.DeviceModel) + ","
+                    + "\"FirmwareVersion\":" + ToJsonString(probe.FirmwareVersion) + ","
+                    + "\"SerialNumber\":" + ToJsonString(probe.SerialNumber) + ","
+                    + "\"DeviceName\":" + ToJsonString(probe.DeviceName) + ","
+                    + "\"DeviceType\":" + (probe.DeviceType == '\0' ? "null" : ToJsonString(probe.DeviceType.ToString()))
+                    + "}";
+            }
+
+            string mirrorSnapshotStartJson = null;
+            if (mirror != null)
+            {
+                mirrorSnapshotStartJson = "{"
+                    + "\"ID\":" + ToJsonString(mirror.ID) + ","
+                    + "\"IDN\":" + ToJsonString(mirror.IDN) + ","
+                    + "\"SerialNumber\":" + ToJsonString(mirror.SerialNumber) + ","
+                    + "\"LastCalibrationUtc\":null,"
+                    + "\"NextDueUtc\":null"
+                    + "}";
+            }
+
+            string chamberSnapshotStartJson = null;
+            if (chamber != null)
+            {
+                chamberSnapshotStartJson = "{"
+                    + "\"Name\":" + ToJsonString(chamber.Name) + ","
+                    + "\"LastIpAddress\":" + ToJsonString(chamber.IPAddress) + ","
+                    + "\"HC2SerialNumber\":" + ToJsonString(chamber.HC2Serial) + ","
+                    + "\"ControlProbeCalibrationUtc\":null,"
+                    + "\"ControlProbeNextDueUtc\":null"
+                    + "}";
+            }
+
+            try
+            {
+                var dbPath = Data.GetDatabasePath();
+                var connStr = string.Format(CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+                using (var conn = new SQLiteConnection(connStr))
+                {
+                    conn.Open();
+
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = @"
+INSERT INTO Calibration (
+    CalibrationId,
+    StartedUtc,
+    OperatorName,
+    Notes,
+    ProbeSerialNumber,
+    MirrorSerialNumber,
+    ChamberControllerSerialNumber,
+    ProbeSnapshotStartJson,
+    MirrorSnapshotStartJson,
+    ChamberSnapshotStartJson
+) VALUES (
+    @CalibrationId,
+    @StartedUtc,
+    @OperatorName,
+    @Notes,
+    @ProbeSerialNumber,
+    @MirrorSerialNumber,
+    @ChamberControllerSerialNumber,
+    @ProbeSnapshotStartJson,
+    @MirrorSnapshotStartJson,
+    @ChamberSnapshotStartJson
+);";
+
+                        cmd.Parameters.AddWithValue("@CalibrationId", calibrationID);
+                        cmd.Parameters.AddWithValue("@StartedUtc", startedUtcIso);
+                        cmd.Parameters.AddWithValue("@OperatorName", "Operator");
+                        cmd.Parameters.AddWithValue("@Notes", "None");
+                        cmd.Parameters.AddWithValue("@ProbeSerialNumber", (object)(probe != null ? probe.SerialNumber : null) ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@MirrorSerialNumber", (object)(mirror != null ? mirror.SerialNumber : null) ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@ChamberControllerSerialNumber", (object)(chamber != null ? chamber.ControllerSerial : null) ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@ProbeSnapshotStartJson", (object)probeSnapshotStartJson ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@MirrorSnapshotStartJson", (object)mirrorSnapshotStartJson ?? DBNull.Value);
+                        cmd.Parameters.AddWithValue("@ChamberSnapshotStartJson", (object)chamberSnapshotStartJson ?? DBNull.Value);
+
+                        cmd.ExecuteNonQuery();
+                    }
+
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    MessageBox.Show("Failed to record calibration start snapshot: " + ex.Message, "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                catch { }
+            }
+
             return calibrationID;
+
+
         }
-        public void DataRecorderSnapShotEnd(RotProbe probe, Mirror mirror, Chamber chamber, string CalibrationID)
+
+        private static string ToJsonString(string value)
         {
-            /* Record JSON snapshot of calibration constants, probe name mirror, chamber calibration dates as outline in database design docs at calibration end
-             * 
-             */
+            if (value == null) return "null";
+
+            var sb = new StringBuilder(value.Length + 2);
+            sb.Append('"');
+            for (int i = 0; i < value.Length; i++)
+            {
+                var ch = value[i];
+                switch (ch)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (ch < 0x20)
+                            sb.Append("\\u").Append(((int)ch).ToString("x4", CultureInfo.InvariantCulture));
+                        else
+                            sb.Append(ch);
+                        break;
+                }
+            }
+            sb.Append('"');
+            return sb.ToString();
+        }
+
+        private static string ToJsonNumber(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value)) return "null";
+            return value.ToString("R", CultureInfo.InvariantCulture);
         }
 
 
@@ -327,7 +690,7 @@ namespace Rotronic
                             bool exists;
                             using (var existsCmd = conn.CreateCommand())
                             {
-                                existsCmd.CommandText = "SELECT1 FROM Probe WHERE SerialNumber = @sn LIMIT1;";
+                                existsCmd.CommandText = "SELECT 1 FROM Probe WHERE SerialNumber = @sn LIMIT 1;";
                                 existsCmd.Parameters.AddWithValue("@sn", probe.SerialNumber);
                                 exists = existsCmd.ExecuteScalar() != null;
                             }
@@ -445,7 +808,7 @@ INSERT INTO Probe (
                             bool exists;
                             using (var existsCmd = conn.CreateCommand())
                             {
-                                existsCmd.CommandText = "SELECT1 FROM Mirror WHERE SerialNumber = @sn LIMIT1;";
+                                existsCmd.CommandText = "SELECT 1 FROM Mirror WHERE SerialNumber = @sn LIMIT 1;";
                                 existsCmd.Parameters.AddWithValue("@sn", mirror.SerialNumber);
                                 exists = existsCmd.ExecuteScalar() != null;
                             }
@@ -507,7 +870,7 @@ INSERT INTO Mirror (
                                 bool exists;
                                 using (var existsCmd = conn.CreateCommand())
                                 {
-                                    existsCmd.CommandText = "SELECT1 FROM Chamber WHERE ControllerSerialNumber = @csn LIMIT1;";
+                                    existsCmd.CommandText = "SELECT 1 FROM Chamber WHERE ControllerSerialNumber = @csn LIMIT 1;";
                                     existsCmd.Parameters.AddWithValue("@csn", controllerSerial);
                                     exists = existsCmd.ExecuteScalar() != null;
                                 }
@@ -594,6 +957,69 @@ INSERT INTO Chamber (
          {
              instructions for a temperature step go here.
          }
+
+        private void BeginSamplingUi(TimeSpan duration)
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)(() => BeginSamplingUi(duration)));
+                return;
+            }
+
+            _samplingInProgress = true;
+            _samplingEndUtc = DateTime.UtcNow.Add(duration);
+
+            _buttonTextBeforeSampling = button1.Text;
+            button1.Enabled = false;
+            button1.Text = "Sampling...";
+            textBoxSoak.ReadOnly = true;
+            textBoxSoak.TabStop = false;
+
+            UpdateSamplingUi();
+            _samplingCountdownTimer.Start();
+        }
+
+        private void EndSamplingUi()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)EndSamplingUi);
+                return;
+            }
+
+            _samplingInProgress = false;
+            _samplingCountdownTimer.Stop();
+
+            button1.Text = string.IsNullOrWhiteSpace(_buttonTextBeforeSampling) ? "Start Calibration" : _buttonTextBeforeSampling;
+            button1.Enabled = true;
+        }
+
+        private void UpdateSamplingUi()
+        {
+            if (IsDisposed) return;
+
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)UpdateSamplingUi);
+                return;
+            }
+
+            if (!_samplingInProgress)
+                return;
+
+            var remaining = _samplingEndUtc - DateTime.UtcNow;
+            if (remaining < TimeSpan.Zero)
+                remaining = TimeSpan.Zero;
+
+            textBoxSoak.Text = string.Format(CultureInfo.InvariantCulture, "{0:D2}:{1:D2}", (int)remaining.TotalMinutes, remaining.Seconds);
+
+            if (remaining == TimeSpan.Zero)
+                EndSamplingUi();
+        }
 
          public void AdvancedTemperatureStep(args)
          {
@@ -686,7 +1112,8 @@ INSERT INTO Chamber (
 
         public void SoakTimer(StepClass step)
         {
-            button1.Text = "Skip Soak";
+            if (!_samplingInProgress)
+                button1.Text = "Skip Soak";
             if (step == null) return;
 
             _soakSkipRequested = false;
@@ -728,6 +1155,12 @@ INSERT INTO Chamber (
                 _soakTimer.Tick -= SoakTimer_Tick;
                 _soakTimer.Dispose();
                 _soakTimer = null;
+            }
+
+            if (!_samplingInProgress)
+            {
+                button1.Text = "Start Calibration";
+                button1.Enabled = true;
             }
         }
 
@@ -776,8 +1209,70 @@ INSERT INTO Chamber (
             return true;
         }
 
+        private void CacheStepId(string calibrationId, int stepNumber, int stepId)
+        {
+            if (!_stepIdByCalibrationAndStepNumber.TryGetValue(calibrationId, out var map))
+            {
+                map = new Dictionary<int, int>();
+                _stepIdByCalibrationAndStepNumber[calibrationId] = map;
+            }
+            map[stepNumber] = stepId;
+        }
+
+        private bool TryGetStepId(string calibrationId, int stepNumber, out int stepId)
+        {
+            stepId = 0;
+            if (_stepIdByCalibrationAndStepNumber.TryGetValue(calibrationId, out var map))
+            {
+                return map.TryGetValue(stepNumber, out stepId);
+            }
+            return false;
+        }
+
+        private StepTiming GetStepTiming(string calibrationId, int stepNumber)
+        {
+            if (!_stepTimingsByCalibration.TryGetValue(calibrationId, out var map))
+            {
+                map = new Dictionary<int, StepTiming>();
+                _stepTimingsByCalibration[calibrationId] = map;
+            }
+
+            if (!map.TryGetValue(stepNumber, out var timing))
+            {
+                timing = new StepTiming();
+                map[stepNumber] = timing;
+            }
+
+            return timing;
+        }
+
+        private void SetRampStartUtc(string calibrationId, int stepNumber, DateTime utc)
+        {
+            GetStepTiming(calibrationId, stepNumber).RampStartUtc = utc;
+        }
+
+        private void SetSoakStartUtc(string calibrationId, int stepNumber, DateTime utc)
+        {
+            GetStepTiming(calibrationId, stepNumber).SoakStartUtc = utc;
+        }
+
+        private void SetSoakEndUtc(string calibrationId, int stepNumber, DateTime utc)
+        {
+            GetStepTiming(calibrationId, stepNumber).SoakEndUtc = utc;
+        }
+
+        private static string ToIsoUtcOrNull(DateTime? utc)
+        {
+            if (!utc.HasValue) return null;
+            var value = utc.Value;
+            if (value.Kind != DateTimeKind.Utc)
+                value = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+            return value.ToString("o", CultureInfo.InvariantCulture);
+        }
+
         public void StartCalRoutine(List<RotProbe> rotProbes, Mirror mirror, Chamber chamber, List<StepClass> steps)
         {
+            _calibrationRunning = true;
             // Record initial master data with a single pass over the probe list.
             // Desired order:
             //1) foreach probe -> record initial probe data
@@ -799,28 +1294,308 @@ INSERT INTO Chamber (
             // Finally chamber master record
             DataRecorderNewOrUpdate(null, chamber, null);
 
-            //Collect initial snapshot before beginning caliration. Generate new calibration ID for each probe
-            var CalibrationID = "";
+            // Collect initial snapshot before beginning calibration.
+            // CalibrationId is per-probe.
+            var calibrationIdByProbeSerial = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var probe in rotProbes)
             {
-                CalibrationID = DataRecorderSnapShotStart(probe, mirror, chamber, null);
+                if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber))
+                    continue;
+
+                var calId = DataRecorderSnapShotStart(probe, mirror, chamber);
+                calibrationIdByProbeSerial[probe.SerialNumber] = calId;
             }
 
-            foreach (var step in steps)
+            //iterate through each step in calibration procedure
+            for (int stepIndex = 0; stepIndex < steps.Count; stepIndex++)
             {
+                var step = steps[stepIndex];
+                var stepNumber = stepIndex + 1;
+
+                var rampStartUtc = DateTime.UtcNow;
+                foreach (var calId in calibrationIdByProbeSerial.Values)
+                    SetRampStartUtc(calId, stepNumber, rampStartUtc);
+                // sets chamber conditions or prompts user to set chamber conditions
                 ChamberController(chamber, _manual, step);
+                // starts soak timer to ensure chamber conditions are stable
+                var soakStartUtc = DateTime.UtcNow;
+                foreach (var calId in calibrationIdByProbeSerial.Values)
+                    SetSoakStartUtc(calId, stepNumber, soakStartUtc);
                 SoakTimer(step);
+                //wait step holds here until skip button is pressed or timer completes
                 WaitForSoakToComplete();
-                foreach (var probe in rotProbes)
+                var soakEndUtc = DateTime.UtcNow;
+                foreach (var calId in calibrationIdByProbeSerial.Values)
+                    SetSoakEndUtc(calId, stepNumber, soakEndUtc);
+
+                // Sampling: AFTER soak. 5 samples total, each 15 seconds apart.
+                // Important: sample "rounds" (all probes captured) share the same delay, to avoid 15s * probeCount.
+                BeginSamplingUi(TimeSpan.FromSeconds(75));
+                var bufferedSamplesByCalibration = new Dictionary<string, List<SampleRecord>>(StringComparer.Ordinal);
+                foreach (var kvp in calibrationIdByProbeSerial)
                 {
-                    DataRecorder(probe, mirror, chamber, step, CalibrationID);
+                    if (!bufferedSamplesByCalibration.ContainsKey(kvp.Value))
+                        bufferedSamplesByCalibration[kvp.Value] = new List<SampleRecord>();
+                }
+                for (int sampleIndex = 0; sampleIndex < 5; sampleIndex++)
+                {
+                    var nowUtc = DateTime.UtcNow;
+                    foreach (var probe in rotProbes)
+                    {
+                        if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+                        if (!calibrationIdByProbeSerial.TryGetValue(probe.SerialNumber, out var calId)) continue;
+                        if (!bufferedSamplesByCalibration.TryGetValue(calId, out var list)) continue;
+                        var timing = GetStepTiming(calId, stepNumber);
+                        DataRecorder(probe, mirror, chamber, step, calId, stepNumber, timing, list);
+                    }
+
+                    if (sampleIndex < 4)
+                    {
+                        var waitUntil = nowUtc.AddSeconds(15);
+                        while (!IsDisposed && DateTime.UtcNow < waitUntil)
+                        {
+                            Application.DoEvents();
+                            UpdateSamplingUi();
+                            System.Threading.Thread.Sleep(50);
+                        }
+                    }
+
+                }
+
+                EndSamplingUi();
+
+                // Flush buffered samples to DB (one transaction). This keeps UI responsive by offloading work.
+                var stepCopy = step;
+                var stepNumberCopy = stepNumber;
+                foreach (var kvp in bufferedSamplesByCalibration)
+                {
+                    var calIdCopy = kvp.Key;
+                    var samplesCopy = kvp.Value;
+                    var stepInsertionTiming = GetStepTiming(calIdCopy, stepNumberCopy);
+                    Task.Run(() => FlushStepAndSamplesToDatabase(calIdCopy, stepCopy, stepNumberCopy, stepInsertionTiming, samplesCopy));
                 }
             }
 
+            // records final probe/mirror/chamber conditions at end of calibration
             foreach (var probe in rotProbes)
             {
-                DataRecorderSnapShotEnd(probe, mirror, chamber, CalibrationID);
+                if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+                if (!calibrationIdByProbeSerial.TryGetValue(probe.SerialNumber, out var calId)) continue;
+                DataRecorderSnapShotEnd(probe, mirror, chamber, calId);
             }
+
+            _calibrationRunning = false;
+            RefreshCalProgressGrid();
+        }
+
+        private void FlushStepAndSamplesToDatabase(string calibrationId, StepClass step, int stepNumber, StepTiming timing, List<SampleRecord> bufferedSamples)
+        {
+            if (string.IsNullOrWhiteSpace(calibrationId) || step == null || stepNumber <= 0 || bufferedSamples == null)
+                return;
+
+            var preserveFirstDisplayedRow = -1;
+            var preserveFirstDisplayedCol = -1;
+            var preserveSelectedRowIndex = -1;
+
+            try
+            {
+                if (dataGridViewCalProgress.DataSource != null)
+                {
+                    preserveFirstDisplayedRow = dataGridViewCalProgress.FirstDisplayedScrollingRowIndex;
+                    preserveFirstDisplayedCol = dataGridViewCalProgress.FirstDisplayedScrollingColumnIndex;
+                    if (dataGridViewCalProgress.CurrentCell != null)
+                        preserveSelectedRowIndex = dataGridViewCalProgress.CurrentCell.RowIndex;
+                }
+            }
+            catch { }
+
+            try
+            {
+                var dbPath = Data.GetDatabasePath();
+                var connStr = string.Format(CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+                using (var conn = new SQLiteConnection(connStr))
+                {
+                    conn.Open();
+                    using (var tx = conn.BeginTransaction())
+                    {
+                        // Ensure Step exists
+                        if (!TryGetStepId(calibrationId, stepNumber, out var stepId))
+                        {
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.CommandText = @"
+INSERT INTO Step (
+    CalibrationId,
+    StepNumber,
+    StepName,
+    HumiditySetpoint,
+    TemperatureSetpointC,
+    Accuracy,
+    Adjustment,
+    RampStartUtc,
+    SoakStartUtc,
+    SoakEndUtc
+) VALUES (
+    @CalibrationId,
+    @StepNumber,
+    @StepName,
+    @HumiditySetpoint,
+    @TemperatureSetpointC,
+    @Accuracy,
+    @Adjustment,
+    @RampStartUtc,
+    @SoakStartUtc,
+    @SoakEndUtc
+);
+SELECT last_insert_rowid();";
+                                cmd.Parameters.AddWithValue("@CalibrationId", calibrationId);
+                                cmd.Parameters.AddWithValue("@StepNumber", stepNumber);
+                                cmd.Parameters.AddWithValue("@StepName", (object)step.Step ?? DBNull.Value);
+                                cmd.Parameters.AddWithValue("@HumiditySetpoint", step.SetPointRH);
+                                cmd.Parameters.AddWithValue("@TemperatureSetpointC", step.SetPointTemp);
+                                cmd.Parameters.AddWithValue("@Accuracy", step.Accuracy);
+                                cmd.Parameters.AddWithValue("@Adjustment", step.Adjust ? 1 : 0);
+                                cmd.Parameters.AddWithValue("@RampStartUtc", (object)ToIsoUtcOrNull(timing != null ? timing.RampStartUtc : null) ?? DBNull.Value);
+                                cmd.Parameters.AddWithValue("@SoakStartUtc", (object)ToIsoUtcOrNull(timing != null ? timing.SoakStartUtc : null) ?? DBNull.Value);
+                                cmd.Parameters.AddWithValue("@SoakEndUtc", (object)ToIsoUtcOrNull(timing != null ? timing.SoakEndUtc : null) ?? DBNull.Value);
+                                stepId = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+                            }
+                            CacheStepId(calibrationId, stepNumber, stepId);
+                        }
+
+                        DateTime? firstUtc = null;
+                        DateTime? lastUtc = null;
+
+                        using (var insertCmd = conn.CreateCommand())
+                        {
+                            insertCmd.CommandText = @"
+INSERT INTO Sample (
+    StepId,
+    CalibrationId,
+    SampleUtc,
+    ProbeHumidity,
+    ProbeHumidityCount,
+    ProbeHumidityRaw,
+    ProbeTemperatureC,
+    ProbeTemperatureCount,
+    ProbeResistance,
+    MirrorDewPointC,
+    MirrorFrostPointC,
+    MirrorHumidity,
+    ExternalTemperatureC,
+    MirrorTemperatureC,
+    ChamberTemperatureC,
+    ChamberTemperatureSetpointC,
+    ChamberHumidity,
+    ChamberHumiditySetpoint
+) VALUES (
+    @StepId,
+    @CalibrationId,
+    @SampleUtc,
+    @ProbeHumidity,
+    @ProbeHumidityCount,
+    @ProbeHumidityRaw,
+    @ProbeTemperatureC,
+    @ProbeTemperatureCount,
+    @ProbeResistance,
+    @MirrorDewPointC,
+    @MirrorFrostPointC,
+    @MirrorHumidity,
+    @ExternalTemperatureC,
+    @MirrorTemperatureC,
+    @ChamberTemperatureC,
+    @ChamberTemperatureSetpointC,
+    @ChamberHumidity,
+    @ChamberHumiditySetpoint
+);";
+
+                            var pStepId = insertCmd.CreateParameter(); pStepId.ParameterName = "@StepId"; insertCmd.Parameters.Add(pStepId);
+                            var pCalId = insertCmd.CreateParameter(); pCalId.ParameterName = "@CalibrationId"; insertCmd.Parameters.Add(pCalId);
+                            var pUtc = insertCmd.CreateParameter(); pUtc.ParameterName = "@SampleUtc"; insertCmd.Parameters.Add(pUtc);
+                            var pPH = insertCmd.CreateParameter(); pPH.ParameterName = "@ProbeHumidity"; insertCmd.Parameters.Add(pPH);
+                            var pPHC = insertCmd.CreateParameter(); pPHC.ParameterName = "@ProbeHumidityCount"; insertCmd.Parameters.Add(pPHC);
+                            var pPHR = insertCmd.CreateParameter(); pPHR.ParameterName = "@ProbeHumidityRaw"; insertCmd.Parameters.Add(pPHR);
+                            var pPT = insertCmd.CreateParameter(); pPT.ParameterName = "@ProbeTemperatureC"; insertCmd.Parameters.Add(pPT);
+                            var pPTC = insertCmd.CreateParameter(); pPTC.ParameterName = "@ProbeTemperatureCount"; insertCmd.Parameters.Add(pPTC);
+                            var pPR = insertCmd.CreateParameter(); pPR.ParameterName = "@ProbeResistance"; insertCmd.Parameters.Add(pPR);
+                            var pMDP = insertCmd.CreateParameter(); pMDP.ParameterName = "@MirrorDewPointC"; insertCmd.Parameters.Add(pMDP);
+                            var pMFP = insertCmd.CreateParameter(); pMFP.ParameterName = "@MirrorFrostPointC"; insertCmd.Parameters.Add(pMFP);
+                            var pMH = insertCmd.CreateParameter(); pMH.ParameterName = "@MirrorHumidity"; insertCmd.Parameters.Add(pMH);
+                            var pET = insertCmd.CreateParameter(); pET.ParameterName = "@ExternalTemperatureC"; insertCmd.Parameters.Add(pET);
+                            var pMT = insertCmd.CreateParameter(); pMT.ParameterName = "@MirrorTemperatureC"; insertCmd.Parameters.Add(pMT);
+                            var pCT = insertCmd.CreateParameter(); pCT.ParameterName = "@ChamberTemperatureC"; insertCmd.Parameters.Add(pCT);
+                            var pCTS = insertCmd.CreateParameter(); pCTS.ParameterName = "@ChamberTemperatureSetpointC"; insertCmd.Parameters.Add(pCTS);
+                            var pCH = insertCmd.CreateParameter(); pCH.ParameterName = "@ChamberHumidity"; insertCmd.Parameters.Add(pCH);
+                            var pCHS = insertCmd.CreateParameter(); pCHS.ParameterName = "@ChamberHumiditySetpoint"; insertCmd.Parameters.Add(pCHS);
+
+                            foreach (var s in bufferedSamples)
+                            {
+                                var utcIso = s.SampleUtc.ToString("o", CultureInfo.InvariantCulture);
+                                if (!firstUtc.HasValue || s.SampleUtc < firstUtc.Value) firstUtc = s.SampleUtc;
+                                if (!lastUtc.HasValue || s.SampleUtc > lastUtc.Value) lastUtc = s.SampleUtc;
+
+                                pStepId.Value = stepId;
+                                pCalId.Value = calibrationId;
+                                pUtc.Value = utcIso;
+                                pPH.Value = (object)s.ProbeHumidity ?? DBNull.Value;
+                                pPHC.Value = (object)s.ProbeHumidityCount ?? DBNull.Value;
+                                pPHR.Value = (object)s.ProbeHumidityRaw ?? DBNull.Value;
+                                pPT.Value = (object)s.ProbeTemperatureC ?? DBNull.Value;
+                                pPTC.Value = (object)s.ProbeTemperatureCount ?? DBNull.Value;
+                                pPR.Value = (object)s.ProbeResistance ?? DBNull.Value;
+                                pMDP.Value = (object)s.MirrorDewPointC ?? DBNull.Value;
+                                pMFP.Value = (object)s.MirrorFrostPointC ?? DBNull.Value;
+                                pMH.Value = (object)s.MirrorHumidity ?? DBNull.Value;
+                                pET.Value = (object)s.ExternalTemperatureC ?? DBNull.Value;
+                                pMT.Value = (object)s.MirrorTemperatureC ?? DBNull.Value;
+                                pCT.Value = (object)s.ChamberTemperatureC ?? DBNull.Value;
+                                pCTS.Value = (object)s.ChamberTemperatureSetpointC ?? DBNull.Value;
+                                pCH.Value = (object)s.ChamberHumidity ?? DBNull.Value;
+                                pCHS.Value = (object)s.ChamberHumiditySetpoint ?? DBNull.Value;
+
+                                insertCmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        if (firstUtc.HasValue && lastUtc.HasValue)
+                        {
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.CommandText = @"
+UPDATE Step
+SET
+    FirstSampleUtc = COALESCE(FirstSampleUtc, @FirstSampleUtc),
+    LastSampleUtc = @LastSampleUtc
+WHERE StepId = @StepId;";
+                                cmd.Parameters.AddWithValue("@FirstSampleUtc", firstUtc.Value.ToString("o", CultureInfo.InvariantCulture));
+                                cmd.Parameters.AddWithValue("@LastSampleUtc", lastUtc.Value.ToString("o", CultureInfo.InvariantCulture));
+                                cmd.Parameters.AddWithValue("@StepId", stepId);
+                                cmd.ExecuteNonQuery();
+                            }
+                        }
+
+                        tx.Commit();
+                    }
+                }
+
+                try
+                {
+                    if (!IsDisposed)
+                        BeginInvoke((Action)RefreshCalProgressGrid);
+                }
+                catch { }
+            }
+            catch
+            {
+                // Swallow to avoid crashing background thread; UI already manages user feedback elsewhere.
+            }
+        }
+
+        public void DataRecorderSnapShotEnd(RotProbe probe, Mirror mirror, Chamber chamber, string calibrationID)
+        {
+            // TODO: implement end-of-calibration snapshot and update Calibration.EndedUtc + *SnapshotEndJson.
+            return;
         }
 
         private void WaitForSoakToComplete()

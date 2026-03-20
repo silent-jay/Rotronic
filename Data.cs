@@ -11,10 +11,10 @@ namespace Rotronic
 
         public static string GetDatabasePath()
         {
-            var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var appDir = Path.Combine(baseDir, "Rotronic");
-            Directory.CreateDirectory(appDir);
-            return Path.Combine(appDir, DatabaseFileName);
+            var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            var dataDir = Path.Combine(exeDir, "Data");
+            Directory.CreateDirectory(dataDir);
+            return Path.Combine(dataDir, DatabaseFileName);
         }
 
         private static string GetConnectionString()

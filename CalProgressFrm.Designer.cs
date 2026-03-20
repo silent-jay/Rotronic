@@ -39,12 +39,12 @@
             this.label3 = new System.Windows.Forms.Label();
             this.label4 = new System.Windows.Forms.Label();
             this.textBoxSoak = new System.Windows.Forms.TextBox();
-            this.dataGridView1 = new System.Windows.Forms.DataGridView();
+            this.dataGridViewCalProgress = new System.Windows.Forms.DataGridView();
             this.labelChamber = new System.Windows.Forms.Label();
             this.labelMirror = new System.Windows.Forms.Label();
             this.panelChamberStable = new System.Windows.Forms.Panel();
             this.panelMirrorStable = new System.Windows.Forms.Panel();
-            ((System.ComponentModel.ISupportInitialize)(this.dataGridView1)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.dataGridViewCalProgress)).BeginInit();
             this.SuspendLayout();
             // 
             // button1
@@ -141,15 +141,15 @@
             this.textBoxSoak.Size = new System.Drawing.Size(193, 62);
             this.textBoxSoak.TabIndex = 10;
             // 
-            // dataGridView1
+            // dataGridViewCalProgress
             // 
-            this.dataGridView1.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dataGridView1.Location = new System.Drawing.Point(49, 108);
-            this.dataGridView1.Name = "dataGridView1";
-            this.dataGridView1.RowHeadersWidth = 62;
-            this.dataGridView1.RowTemplate.Height = 28;
-            this.dataGridView1.Size = new System.Drawing.Size(1380, 359);
-            this.dataGridView1.TabIndex = 11;
+            this.dataGridViewCalProgress.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dataGridViewCalProgress.Location = new System.Drawing.Point(49, 108);
+            this.dataGridViewCalProgress.Name = "dataGridViewCalProgress";
+            this.dataGridViewCalProgress.RowHeadersWidth = 62;
+            this.dataGridViewCalProgress.RowTemplate.Height = 28;
+            this.dataGridViewCalProgress.Size = new System.Drawing.Size(1641, 433);
+            this.dataGridViewCalProgress.TabIndex = 11;
             // 
             // labelChamber
             // 
@@ -198,7 +198,7 @@
             this.Controls.Add(this.panelChamberStable);
             this.Controls.Add(this.labelMirror);
             this.Controls.Add(this.labelChamber);
-            this.Controls.Add(this.dataGridView1);
+            this.Controls.Add(this.dataGridViewCalProgress);
             this.Controls.Add(this.textBoxSoak);
             this.Controls.Add(this.label4);
             this.Controls.Add(this.label3);
@@ -212,7 +212,7 @@
             this.Controls.Add(this.button1);
             this.Name = "CalProgressFrm";
             this.Text = "CalProgressFrm";
-            ((System.ComponentModel.ISupportInitialize)(this.dataGridView1)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.dataGridViewCalProgress)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -231,7 +231,7 @@
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.TextBox textBoxSoak;
-        private System.Windows.Forms.DataGridView dataGridView1;
+        private System.Windows.Forms.DataGridView dataGridViewCalProgress;
         private System.Windows.Forms.Label labelChamber;
         private System.Windows.Forms.Label labelMirror;
         private System.Windows.Forms.Panel panelChamberStable;

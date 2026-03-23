@@ -1,13 +1,4 @@
-﻿/*
- * todo:
- * global ceslius setting troubleshooting
- * Auto detect new devices during runtime
- * temperature adjustment sequence not working still
- * Chamber API
- * PDF report generation
- * prevent mirror/probes in use on one cal instance from being used on another
- */
-using DocumentFormat.OpenXml.Vml.Office;
+﻿using DocumentFormat.OpenXml.Vml.Office;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1887,7 +1878,7 @@ namespace Rotronic
             // Defensive checks
             if (string.IsNullOrWhiteSpace(response))
                 return null;
-
+            
             // Extract payload starting at '{' if present
             var payloadStart = response.IndexOf('{');
             var payload = payloadStart >= 0 ? response.Substring(payloadStart + 1) : response;

@@ -78,7 +78,7 @@
             this.textBoxHum.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
             this.textBoxHum.Location = new System.Drawing.Point(569, 592);
             this.textBoxHum.Name = "textBoxHum";
-            this.textBoxHum.Size = new System.Drawing.Size(197, 62);
+            this.textBoxHum.Size = new System.Drawing.Size(266, 62);
             this.textBoxHum.TabIndex = 3;
             // 
             // textBoxTempSP
@@ -94,7 +94,7 @@
             this.textBoxHumSP.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
             this.textBoxHumSP.Location = new System.Drawing.Point(569, 704);
             this.textBoxHumSP.Name = "textBoxHumSP";
-            this.textBoxHumSP.Size = new System.Drawing.Size(197, 62);
+            this.textBoxHumSP.Size = new System.Drawing.Size(266, 62);
             this.textBoxHumSP.TabIndex = 5;
             // 
             // label1
@@ -155,7 +155,7 @@
             // 
             this.labelChamber.AutoSize = true;
             this.labelChamber.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.labelChamber.Location = new System.Drawing.Point(878, 599);
+            this.labelChamber.Location = new System.Drawing.Point(897, 591);
             this.labelChamber.Name = "labelChamber";
             this.labelChamber.Size = new System.Drawing.Size(402, 55);
             this.labelChamber.TabIndex = 12;
@@ -165,7 +165,7 @@
             // 
             this.labelMirror.AutoSize = true;
             this.labelMirror.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.labelMirror.Location = new System.Drawing.Point(878, 710);
+            this.labelMirror.Location = new System.Drawing.Point(897, 700);
             this.labelMirror.Name = "labelMirror";
             this.labelMirror.Size = new System.Drawing.Size(328, 55);
             this.labelMirror.TabIndex = 13;
@@ -174,7 +174,7 @@
             // panelChamberStable
             // 
             this.panelChamberStable.BackColor = System.Drawing.Color.Red;
-            this.panelChamberStable.Location = new System.Drawing.Point(841, 612);
+            this.panelChamberStable.Location = new System.Drawing.Point(860, 604);
             this.panelChamberStable.Name = "panelChamberStable";
             this.panelChamberStable.Size = new System.Drawing.Size(28, 28);
             this.panelChamberStable.TabIndex = 14;
@@ -183,7 +183,7 @@
             // panelMirrorStable
             // 
             this.panelMirrorStable.BackColor = System.Drawing.Color.Red;
-            this.panelMirrorStable.Location = new System.Drawing.Point(841, 723);
+            this.panelMirrorStable.Location = new System.Drawing.Point(860, 713);
             this.panelMirrorStable.Name = "panelMirrorStable";
             this.panelMirrorStable.Size = new System.Drawing.Size(28, 28);
             this.panelMirrorStable.TabIndex = 15;

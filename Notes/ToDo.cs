@@ -1,35 +1,53 @@
-﻿/* Create class to send and read responses to Rotronic probes
- * Create class to send and read responses from chilled mirror
- * create class to send and read responses from Rotronic Hygrogen Chamber
- * Need to explore best way to gracefully handle multiple device connections (USB, Serial, Ethernet)
- * Need to be able to send commands to multiple devices and read responses asynchronously
- * Need to be able to handle serial connections gracefully (open/close ports as needed, without causing conflict)
- * Use Responses from various devices to populate variables/objects that can be used for UI display and calibration
- * Create UI to create and load calibration scripts
- * Calibration UI must be able to run calibration sequences, log and save results to excel, save calibration constants to device
- * UI should be able to detect when new devices are connected.
- * Multiple calibration sequences should be able to run simultaneously on different devices.
- * calculated offset is difference between probe's actual measurement and 0°C, not mirror-probe.
-To calculate the new offset we need to use the probe's temperature conversion value (RotProbe.TempConversion) and the calculated R0 value (probe resistance @ 0 °C).
+﻿/*
+Centralized TODO list.
 
+Keep implementation notes (what/why) here and keep code comments focused on intent.
 
+-------------------------------------------------------------------------------
+Calibration / workflow
+-------------------------------------------------------------------------------
+- Add timeout / "close enough" option when chamber cannot reach setpoints
+  (0°C and 5%RH are difficult).
+- If calibration procedure is interrupted, restore probe to snapshot taken.
+- Validation "Update values" doesn't do anything to the chamber.
+- Restore probe to factory settings before taking any adjustment points.
+- A no warning mode with some warnings prior to making adjustments/changes, etc.
 
-mirror control response examples:
-DP? dew point
-22.4971
-IDN? 473
-ID? DPM 473r2
-SN? serial number
-13-0418
-Tm? 15.1914
-Stable?
-1 (1 = stable, 0=not stable)
-Control = 1 (turns mirror on)
+-------------------------------------------------------------------------------
+UI / reporting
+-------------------------------------------------------------------------------
+- UI user management
+- Calibration Certificates
+- Pre-populate database with validated calibration procedures.
+  (recovery if program fails/crashes/interrupted).
+- Verify dates are being updated.
 
-baud settings:
-Baud Rate: 9600
-Data Bits: 8
-Stop Bits: 1
-Handshaking: None
+-------------------------------------------------------------------------------
+Safety / validation
+-------------------------------------------------------------------------------
+- Guard against loading very bad coefficients to the probe.
+- Temperature/Humidity min/max for procedure and chamber inputs.
 
- */
+-------------------------------------------------------------------------------
+Mirror / temperature terminology
+-------------------------------------------------------------------------------
+- MirrorTemp and ExternalTemp are used interchangeably/incorrectly.
+  ExternalTemp is the PRT for the mirror; MirrorTemp is the mirror internal temp
+  which determines the reported dew/frost point.
+  For now continue to use MirrorTemp as the "reference" temperature.
+- Ensure mirror temp matches expected probe format (decimal precision, etc.).
+- Make sure mirror control turns off when not in use.
+- Mirror data collector probably needs some adjustment. Right now only collects
+  minimal amount of data - external temp and humidity to get UI functioning.
+
+-------------------------------------------------------------------------------
+Misc
+-------------------------------------------------------------------------------
+- Global Celsius setting troubleshooting.
+- Auto-detect new devices during runtime.
+- Help file, manuals, etc.
+- Alert that calibration is complete. Change button to close form.
+- Probe cal and due dates not updating.
+- Reverse traceability from mirror/chamber to probes used.
+- Force decimal Precision across application.
+*/

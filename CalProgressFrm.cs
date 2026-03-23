@@ -16,6 +16,8 @@ namespace Rotronic
 
     public partial class CalProgressFrm : Form
     {
+        private const int SamplesPerStep = 5;
+        private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
         private readonly List<RotProbe> _selectedProbes;
         private readonly Mirror _selectedMirror;
         private readonly Chamber _selectedChamber;
@@ -26,6 +28,10 @@ namespace Rotronic
 
         private readonly Timer _gridRefreshTimer = new Timer();
         private volatile bool _calibrationRunning = false;
+
+        private volatile bool _closeRequested = false;
+        private readonly object _calibrationIdsLock = new object();
+        private readonly HashSet<string> _activeCalibrationIds = new HashSet<string>(StringComparer.Ordinal);
 
         private readonly Timer _samplingCountdownTimer = new Timer();
         private volatile bool _samplingInProgress = false;
@@ -90,6 +96,7 @@ namespace Rotronic
                 return;
 
             this.FormClosed += CalProgressFrm_FormClosed;
+            this.FormClosing += CalProgressFrm_FormClosing;
 
             _selectedProbes = selectedProbes ?? new List<RotProbe>();
             _selectedMirror = selectedMirror;
@@ -355,10 +362,92 @@ ORDER BY sa.SampleUtc ASC;";
             if (_selectedChamber != null)
                 SafeClose(_selectedChamber);
         }
+
+        private void CalProgressFrm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (_closeRequested)
+                return;
+
+            if (!_calibrationRunning)
+                return;
+
+            var result = MessageBox.Show(
+                "A calibration is in progress, are you sure you want to close?",
+                "Calibration In Progress",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+
+            if (result != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            _closeRequested = true;
+
+            try { SkipSoakTimer(); } catch { }
+
+            // Best-effort safety shutdown actions before close.
+            try { TurnOffChamberControl(_selectedChamber); } catch { }
+            try { RollbackActiveCalibrations(); } catch { }
+        }
+
+        private void TurnOffChamberControl(Chamber chamber)
+        {
+            if (chamber == null)
+                return;
+
+            try { ChamberCommands.SetTempControl(chamber, false); } catch { }
+            try { ChamberCommands.SetRHControl(chamber, false); } catch { }
+        }
+
+        private void RollbackActiveCalibrations()
+        {
+            List<string> ids;
+            lock (_calibrationIdsLock)
+            {
+                ids = _activeCalibrationIds.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal).ToList();
+                _activeCalibrationIds.Clear();
+            }
+
+            if (ids.Count == 0)
+                return;
+
+            var dbPath = Data.GetDatabasePath();
+            var connStr = string.Format(CultureInfo.InvariantCulture, "Data Source={0};Version=3;Foreign Keys=True;", dbPath);
+
+            using (var conn = new SQLiteConnection(connStr))
+            {
+                conn.Open();
+                using (var tx = conn.BeginTransaction())
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = "DELETE FROM Calibration WHERE CalibrationId = @id;";
+                        var p = cmd.Parameters.Add("@id", DbType.String);
+
+                        foreach (var id in ids)
+                        {
+                            p.Value = id;
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    tx.Commit();
+                }
+            }
+        }
         public void ChamberController(Chamber chamber, bool Manual, StepClass stepClass)
         {
+            if (_closeRequested || IsDisposed)
+                return;
+
             if (Manual)
             {
+                if (_closeRequested || IsDisposed)
+                    return;
                 MessageBox.Show("Please set the chamber to the following conditions: " + stepClass.SetPointTemp + "°C and " + stepClass.SetPointRH + "%RH. Click OK when conditions are stable.");
             }
             else
@@ -370,8 +459,10 @@ ORDER BY sa.SampleUtc ASC;";
                 // Monitor stability and begin soak time countdown when stable
                 while (!chamber.TempStable || !chamber.HumStable)
                 {
-                    //TODO: Add timeout in case chamber cannot reach conditions - 0°C and 5%RH are difficult conditions, need a "close enough" option
-                    //TODO: UI element to show stability status and current chamber conditions
+
+                    if (_closeRequested || IsDisposed)
+                        return;
+
                     RefreshStabilityIndicators();
                     Application.DoEvents(); // Keep UI responsive
                 }
@@ -434,6 +525,14 @@ ORDER BY sa.SampleUtc ASC;";
 
             UpdateSamplingUi();
             _samplingCountdownTimer.Start();
+        }
+
+        private static TimeSpan GetSamplingUiDuration(int samplesPerStep, TimeSpan interval)
+        {
+            if (samplesPerStep <= 0) return TimeSpan.Zero;
+            if (samplesPerStep == 1) return TimeSpan.Zero;
+            if (interval < TimeSpan.Zero) interval = TimeSpan.Zero;
+            return TimeSpan.FromTicks(interval.Ticks * (samplesPerStep - 1));
         }
 
         private void EndSamplingUi()
@@ -1054,94 +1153,6 @@ INSERT INTO Chamber (
             }
         }
         /*
-
-         public void TemperatureStep(args)
-         {
-             instructions for a temperature step go here.
-         }
-
-        private void BeginSamplingUi(TimeSpan duration)
-        {
-            if (IsDisposed) return;
-
-            if (InvokeRequired)
-            {
-                BeginInvoke((Action)(() => BeginSamplingUi(duration)));
-                return;
-            }
-
-            _samplingInProgress = true;
-            _samplingEndUtc = DateTime.UtcNow.Add(duration);
-
-            _buttonTextBeforeSampling = button1.Text;
-            button1.Enabled = false;
-            button1.Text = "Sampling...";
-            textBoxSoak.ReadOnly = true;
-            textBoxSoak.TabStop = false;
-
-            UpdateSamplingUi();
-            _samplingCountdownTimer.Start();
-        }
-
-        private void EndSamplingUi()
-        {
-            if (IsDisposed) return;
-
-            if (InvokeRequired)
-            {
-                BeginInvoke((Action)EndSamplingUi);
-                return;
-            }
-
-            _samplingInProgress = false;
-            _samplingCountdownTimer.Stop();
-
-            button1.Text = string.IsNullOrWhiteSpace(_buttonTextBeforeSampling) ? "Start Calibration" : _buttonTextBeforeSampling;
-            button1.Enabled = true;
-        }
-
-        private void UpdateSamplingUi()
-        {
-            if (IsDisposed) return;
-
-            if (InvokeRequired)
-            {
-                BeginInvoke((Action)UpdateSamplingUi);
-                return;
-            }
-
-            if (!_samplingInProgress)
-                return;
-
-            var remaining = _samplingEndUtc - DateTime.UtcNow;
-            if (remaining < TimeSpan.Zero)
-                remaining = TimeSpan.Zero;
-
-            textBoxSoak.Text = string.Format(CultureInfo.InvariantCulture, "{0:D2}:{1:D2}", (int)remaining.TotalMinutes, remaining.Seconds);
-
-            if (remaining == TimeSpan.Zero)
-                EndSamplingUi();
-        }
-
-         public void AdvancedTemperatureStep(args)
-         {
-             advanced temperature adjustment should go here
-         }
-
-         public void HumidityAdjustmentStep(args)
-         {
-             instructions for a humidity adjustment step go here.
-         }
-         public void TemperatureAdjustmentStep(args)
-         {
-             instructions for a temperature adjustment step go here.
-         }
-         public void AdjustStep(args)
-         {
-         send adjust commmand to probe
-         }
-
-            /*
      Public members reference (auto-inserted)
      
         pseudo-code:
@@ -1415,9 +1426,6 @@ INSERT INTO Chamber (
             */
 
 
-            //TODO possible correction accross code base. MirrorTemp and ExternalTemp are being used interchangeably, incorrectly. ExternalTemp is the prt for the mirror, mirror temp is the
-            //mirrors internal temp, which determines the reported dew/frost point... for right now continue to use MirrorTemp as the "reference" temperature. Will fix and make consistnent in future update.
-
             try
             {
                 var dbPath = Data.GetDatabasePath();
@@ -1479,7 +1487,7 @@ ORDER BY s.StepNumber;";
                         ProbeTempCount = probeTempCounts.ToArray();
                         ProbeResistance = probeResistances.ToArray();
 
-                        TemperatureCalculator(ProbeTemp, ProbeTempCount, ProbeResistance, MirrorTemp, probe);
+                        ApplyAdvancedTemperatureCoefficients(ProbeTemp, ProbeTempCount, ProbeResistance, MirrorTemp, probe);
                     }
                 }
             }
@@ -1491,10 +1499,17 @@ ORDER BY s.StepNumber;";
 
         }
 
-        public void TemperatureCalculator(double[] probeTemp, double[] probeTempCount, double[] probeResistance, double[] mirrorTemp, RotProbe probe)
+        private static void ApplyAdvancedTemperatureCoefficients(double[] probeTemp, double[] probeTempCount, double[] probeResistance, double[] mirrorTemp, RotProbe probe)
         {
-            //TODO implement advanced temperature adjustment calculation logic here. Will likely need to reference scientific literature and may require significant code to implement.
-            //Once calculated, write new coefficients/offsets to probe using appropriate commands.
+            if (probe == null)
+                return;
+
+            var result = CoefficientCalc.Calculate(probeTemp, probeTempCount, probeResistance, mirrorTemp, probe.TempConversion);
+
+            RotProbeCommands.SendNewTemperatureCoeffA(probe, result.A);
+            RotProbeCommands.SendNewTemperatureCoeffB(probe, result.B);
+            RotProbeCommands.SendNewTemperatureCoeffC(probe, result.C);
+            RotProbeCommands.SendNewTemperatureOffset(probe, result.Offset);
         }
 
         public void StartCalRoutine(List<RotProbe> rotProbes, Mirror mirror, Chamber chamber, List<StepClass> steps)
@@ -1532,11 +1547,20 @@ ORDER BY s.StepNumber;";
 
                 var calId = DataRecorderSnapShotStart(probe, mirror, chamber);
                 calibrationIdByProbeSerial[probe.SerialNumber] = calId;
+
+                lock (_calibrationIdsLock)
+                {
+                    if (!string.IsNullOrWhiteSpace(calId))
+                        _activeCalibrationIds.Add(calId);
+                }
             }
 
             //iterate through each step in calibration procedure
             for (int stepIndex = 0; stepIndex < steps.Count; stepIndex++)
             {
+                if (_closeRequested || IsDisposed)
+                    break;
+
                 var step = steps[stepIndex];
                 var stepNumber = stepIndex + 1;
 
@@ -1575,6 +1599,8 @@ ORDER BY s.StepNumber;";
                     SetRampStartUtc(calId, stepNumber, rampStartUtc);
                 // sets chamber conditions or prompts user to set chamber conditions
                 ChamberController(chamber, _manual, step);
+                if (_closeRequested || IsDisposed)
+                    break;
                 // starts soak timer to ensure chamber conditions are stable
                 var soakStartUtc = DateTime.UtcNow;
                 foreach (var calId in calibrationIdByProbeSerial.Values)
@@ -1582,21 +1608,26 @@ ORDER BY s.StepNumber;";
                 SoakTimer(step);
                 //wait step holds here until skip button is pressed or timer completes
                 WaitForSoakToComplete();
+                if (_closeRequested || IsDisposed)
+                    break;
                 var soakEndUtc = DateTime.UtcNow;
                 foreach (var calId in calibrationIdByProbeSerial.Values)
                     SetSoakEndUtc(calId, stepNumber, soakEndUtc);
 
-                // Sampling: AFTER soak. 5 samples total, each 15 seconds apart.
-                // Important: sample "rounds" (all probes captured) share the same delay, to avoid 15s * probeCount.
-                BeginSamplingUi(TimeSpan.FromSeconds(75));
+                // Sampling: AFTER soak.
+                // Important: sample "rounds" (all probes captured) share the same delay, to avoid interval * probeCount.
+                BeginSamplingUi(GetSamplingUiDuration(SamplesPerStep, SampleInterval));
                 var bufferedSamplesByCalibration = new Dictionary<string, List<SampleRecord>>(StringComparer.Ordinal);
                 foreach (var kvp in calibrationIdByProbeSerial)
                 {
                     if (!bufferedSamplesByCalibration.ContainsKey(kvp.Value))
                         bufferedSamplesByCalibration[kvp.Value] = new List<SampleRecord>();
                 }
-                for (int sampleIndex = 0; sampleIndex < 5; sampleIndex++)
+                for (int sampleIndex = 0; sampleIndex < SamplesPerStep; sampleIndex++)
                 {
+                    if (_closeRequested || IsDisposed)
+                        break;
+
                     var nowUtc = DateTime.UtcNow;
                     foreach (var probe in rotProbes)
                     {
@@ -1607,11 +1638,13 @@ ORDER BY s.StepNumber;";
                         DataRecorder(probe, mirror, chamber, step, calId, stepNumber, timing, list);
                     }
 
-                    if (sampleIndex < 4)
+                    if (sampleIndex < (SamplesPerStep - 1))
                     {
-                        var waitUntil = nowUtc.AddSeconds(15);
+                        var waitUntil = nowUtc.Add(SampleInterval);
                         while (!IsDisposed && DateTime.UtcNow < waitUntil)
                         {
+                            if (_closeRequested)
+                                break;
                             Application.DoEvents();
                             UpdateSamplingUi();
                             System.Threading.Thread.Sleep(50);
@@ -1645,15 +1678,6 @@ ORDER BY s.StepNumber;";
                     }
                 }
 
-                // TODO: Advanced temperature adjustment placeholder
-                // if (_advancedTempAdjust)
-                // {
-                //     Logic would be kind of complicated as it spans multiple steps.
-                //     First block of steps must be temperature steps (i.e. 4-5 temperature steps in a row).
-                //     Collect temp of reference, resistance of probe, calculate coefficients and offset
-                //     Write to probe using special commands/binary interface
-                // }
-
                 // Flush buffered samples to DB (one transaction). This keeps UI responsive by offloading work.
                 var stepCopy = step;
                 var stepNumberCopy = stepNumber;
@@ -1667,14 +1691,23 @@ ORDER BY s.StepNumber;";
             }
 
             // records final probe/mirror/chamber conditions at end of calibration
-            foreach (var probe in rotProbes)
+            if (!_closeRequested && !IsDisposed)
             {
-                if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
-                if (!calibrationIdByProbeSerial.TryGetValue(probe.SerialNumber, out var calId)) continue;
-                DataRecorderSnapShotEnd(probe, mirror, chamber, calId);
+                foreach (var probe in rotProbes)
+                {
+                    if (probe == null || string.IsNullOrWhiteSpace(probe.SerialNumber)) continue;
+                    if (!calibrationIdByProbeSerial.TryGetValue(probe.SerialNumber, out var calId)) continue;
+                    DataRecorderSnapShotEnd(probe, mirror, chamber, calId);
+                }
             }
 
             _calibrationRunning = false;
+
+            lock (_calibrationIdsLock)
+            {
+                _activeCalibrationIds.Clear();
+            }
+
             RefreshCalProgressGrid();
         }
 

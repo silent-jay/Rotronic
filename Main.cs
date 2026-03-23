@@ -15,6 +15,8 @@ namespace Rotronic
 {
     public partial class Main : Form
     {
+        private readonly HashSet<string> _promptedNewMirrors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _promptedNewChambers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Timer to refresh listViewRotProbe periodically
         private System.Windows.Forms.Timer _refreshTimer;
 
@@ -587,6 +589,8 @@ namespace Rotronic
                     if (c == null)
                         continue;
 
+                    TryAutoAddStandardAndPrompt(c);
+
                     var values = new List<string>(visibleFields.Count);
                     foreach (var kv in visibleFields)
                     {
@@ -625,6 +629,50 @@ namespace Rotronic
             finally
             {
                 listViewChamber.EndUpdate();
+            }
+        }
+
+        private void TryAutoAddStandardAndPrompt(Chamber chamber)
+        {
+            if (chamber == null)
+                return;
+
+            var controllerSerial = (chamber.ControllerSerial ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(controllerSerial))
+                return;
+
+            if (_promptedNewChambers.Contains(controllerSerial))
+                return;
+
+            try
+            {
+                Data.InitializeDatabase();
+                if (Data.ChamberExists(controllerSerial))
+                {
+                    _promptedNewChambers.Add(controllerSerial);
+                    return;
+                }
+
+                Data.UpsertChamber(controllerSerial, chamber.HC2Serial, chamber.Name);
+                _promptedNewChambers.Add(controllerSerial);
+
+                MessageBox.Show(this, "This is the first time connecting this Standard. Please complete the setup.", "Setup Required", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                var frm = new StandardInventoryFrm();
+                frm.Shown += (s, e) =>
+                {
+                    try
+                    {
+                        frm.SelectStandardInComboBox("Chamber", chamber.Name, chamber.HC2Serial);
+                    }
+                    catch { }
+                };
+                frm.Show(this);
+                try { frm.BringToFront(); } catch { }
+            }
+            catch
+            {
+                // ignore auto-add failures
             }
         }
 
@@ -747,6 +795,17 @@ namespace Rotronic
 
                 // Take a thread-safe snapshot of mirrors before touching the UI to avoid races and flicker
                 var mirrors = Program.GetConnectedMirrorsSnapshot();
+
+                // First-time detection should not depend on ListView rebuild logic.
+                try
+                {
+                    if (mirrors != null)
+                    {
+                        foreach (var m in mirrors)
+                            TryAutoAddStandardAndPrompt(m);
+                    }
+                }
+                catch { }
 
                 if (mirrors == null)
                 {
@@ -1008,6 +1067,50 @@ namespace Rotronic
             finally
             {
                 listViewMirror.EndUpdate();
+            }
+        }
+
+        private void TryAutoAddStandardAndPrompt(Mirror mirror)
+        {
+            if (mirror == null)
+                return;
+
+            var sn = (mirror.SerialNumber ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(sn))
+                return;
+
+            if (_promptedNewMirrors.Contains(sn))
+                return;
+
+            try
+            {
+                Data.InitializeDatabase();
+                if (Data.MirrorExists(sn))
+                {
+                    _promptedNewMirrors.Add(sn);
+                    return;
+                }
+
+                Data.UpsertMirror(sn, null);
+                _promptedNewMirrors.Add(sn);
+
+                MessageBox.Show(this, "This is the first time connecting this Standard. Please complete the setup.", "Setup Required", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                var frm = new StandardInventoryFrm();
+                frm.Shown += (s, e) =>
+                {
+                    try
+                    {
+                        frm.SelectStandardInComboBox("Mirror", null, sn);
+                    }
+                    catch { }
+                };
+                frm.Show(this);
+                try { frm.BringToFront(); } catch { }
+            }
+            catch
+            {
+                // ignore auto-add failures
             }
         }
 
@@ -1558,12 +1661,6 @@ namespace Rotronic
             stepListForm.Show(this);
         }
 
-        private void temperatureAdjToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            var tempAdjForm = new TempAdjustSetupFrm();
-            tempAdjForm.Show(this);
-        }
-
         private void celsiusToolStripMenuItem_Click(object sender, EventArgs e)
         {
             if (Program._globalTemperatureC == false)
@@ -1758,6 +1855,18 @@ namespace Rotronic
         {
             var ChamberOptions = new ChamberOptions();
             ChamberOptions.ShowDialog();
+        }
+
+        private void probesToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var probeInventoryFrm = new ProbeInventoryFrm();
+            probeInventoryFrm.ShowDialog();
+        }
+
+        private void standardsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var standardInventoryFrm = new StandardInventoryFrm();
+            standardInventoryFrm.ShowDialog();
         }
     }
 }

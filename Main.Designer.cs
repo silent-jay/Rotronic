@@ -31,7 +31,7 @@
             this.menuStrip1 = new System.Windows.Forms.MenuStrip();
             this.calibrationsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.createStepListToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.temperatureAdjToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.reportingToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.optionsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.headerViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.mirrorViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -39,35 +39,37 @@
             this.celsiusToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.validationToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.hygrogenIPConfigToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.helpToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.toDoManualToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.listViewRotProbe = new System.Windows.Forms.ListView();
             this.label1 = new System.Windows.Forms.Label();
             this.listViewMirror = new System.Windows.Forms.ListView();
             this.label2 = new System.Windows.Forms.Label();
             this.listViewChamber = new System.Windows.Forms.ListView();
             this.label3 = new System.Windows.Forms.Label();
-            this.humidityAdjustToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.probesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.standardsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
             // menuStrip1
             // 
-            this.menuStrip1.GripMargin = new System.Windows.Forms.Padding(2, 2, 0, 2);
             this.menuStrip1.ImageScalingSize = new System.Drawing.Size(24, 24);
             this.menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.calibrationsToolStripMenuItem,
-            this.optionsToolStripMenuItem});
+            this.reportingToolStripMenuItem,
+            this.optionsToolStripMenuItem,
+            this.helpToolStripMenuItem});
             this.menuStrip1.Location = new System.Drawing.Point(0, 0);
             this.menuStrip1.Name = "menuStrip1";
-            this.menuStrip1.Size = new System.Drawing.Size(1939, 36);
+            this.menuStrip1.Size = new System.Drawing.Size(1939, 33);
             this.menuStrip1.TabIndex = 1;
             this.menuStrip1.Text = "menuStrip1";
             // 
             // calibrationsToolStripMenuItem
             // 
             this.calibrationsToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.createStepListToolStripMenuItem,
-            this.temperatureAdjToolStripMenuItem,
-            this.humidityAdjustToolStripMenuItem});
+            this.createStepListToolStripMenuItem});
             this.calibrationsToolStripMenuItem.Name = "calibrationsToolStripMenuItem";
             this.calibrationsToolStripMenuItem.Size = new System.Drawing.Size(121, 29);
             this.calibrationsToolStripMenuItem.Text = "Calibrations";
@@ -75,16 +77,18 @@
             // createStepListToolStripMenuItem
             // 
             this.createStepListToolStripMenuItem.Name = "createStepListToolStripMenuItem";
-            this.createStepListToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.createStepListToolStripMenuItem.Size = new System.Drawing.Size(188, 34);
             this.createStepListToolStripMenuItem.Text = "AutoCal";
             this.createStepListToolStripMenuItem.Click += new System.EventHandler(this.createStepListToolStripMenuItem_Click);
             // 
-            // temperatureAdjToolStripMenuItem
+            // reportingToolStripMenuItem
             // 
-            this.temperatureAdjToolStripMenuItem.Name = "temperatureAdjToolStripMenuItem";
-            this.temperatureAdjToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
-            this.temperatureAdjToolStripMenuItem.Text = "Temperature Adjust";
-            this.temperatureAdjToolStripMenuItem.Click += new System.EventHandler(this.temperatureAdjToolStripMenuItem_Click);
+            this.reportingToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.probesToolStripMenuItem,
+            this.standardsToolStripMenuItem});
+            this.reportingToolStripMenuItem.Name = "reportingToolStripMenuItem";
+            this.reportingToolStripMenuItem.Size = new System.Drawing.Size(103, 29);
+            this.reportingToolStripMenuItem.Text = "Inventory";
             // 
             // optionsToolStripMenuItem
             // 
@@ -143,6 +147,20 @@
             this.hygrogenIPConfigToolStripMenuItem.Text = "Hygrogen IP Config";
             this.hygrogenIPConfigToolStripMenuItem.Click += new System.EventHandler(this.hygrogenIPConfigToolStripMenuItem_Click);
             // 
+            // helpToolStripMenuItem
+            // 
+            this.helpToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.toDoManualToolStripMenuItem});
+            this.helpToolStripMenuItem.Name = "helpToolStripMenuItem";
+            this.helpToolStripMenuItem.Size = new System.Drawing.Size(65, 29);
+            this.helpToolStripMenuItem.Text = "Help";
+            // 
+            // toDoManualToolStripMenuItem
+            // 
+            this.toDoManualToolStripMenuItem.Name = "toDoManualToolStripMenuItem";
+            this.toDoManualToolStripMenuItem.Size = new System.Drawing.Size(219, 34);
+            this.toDoManualToolStripMenuItem.Text = "ToDo Manual";
+            // 
             // listViewRotProbe
             // 
             this.listViewRotProbe.AllowColumnReorder = true;
@@ -199,11 +217,19 @@
             this.label3.TabIndex = 7;
             this.label3.Text = "Chamber List";
             // 
-            // humidityAdjustToolStripMenuItem
+            // probesToolStripMenuItem
             // 
-            this.humidityAdjustToolStripMenuItem.Name = "humidityAdjustToolStripMenuItem";
-            this.humidityAdjustToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
-            this.humidityAdjustToolStripMenuItem.Text = "Humidity Adjust";
+            this.probesToolStripMenuItem.Name = "probesToolStripMenuItem";
+            this.probesToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.probesToolStripMenuItem.Text = "Probes";
+            this.probesToolStripMenuItem.Click += new System.EventHandler(this.probesToolStripMenuItem_Click);
+            // 
+            // standardsToolStripMenuItem
+            // 
+            this.standardsToolStripMenuItem.Name = "standardsToolStripMenuItem";
+            this.standardsToolStripMenuItem.Size = new System.Drawing.Size(270, 34);
+            this.standardsToolStripMenuItem.Text = "Standards";
+            this.standardsToolStripMenuItem.Click += new System.EventHandler(this.standardsToolStripMenuItem_Click);
             // 
             // Main
             // 
@@ -239,14 +265,17 @@
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.ToolStripMenuItem mirrorViewToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem createStepListToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem temperatureAdjToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem celsiusToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem validationToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem hygrogenIPConfigToolStripMenuItem;
       internal System.Windows.Forms.ListView listViewChamber;
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.ToolStripMenuItem hygrogenDisplayOptionsToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem humidityAdjustToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem helpToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem reportingToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem toDoManualToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem probesToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem standardsToolStripMenuItem;
     }
 }
 

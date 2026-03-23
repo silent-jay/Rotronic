@@ -123,7 +123,7 @@ namespace Rotronic
         }
         public static Command TempTestPointSaveCmd(RotProbe probe, Mirror mirror, int timeoutMs = 500)
         {
-            var refTemp = mirror != null ? mirror.MirrorTemp.ToString("F2") : "0.00"; //TODO: ensure mirror temp matches expected format for probe - decimal precision, etc.
+            var refTemp = mirror != null ? mirror.MirrorTemp.ToString("F2") : "0.00"; 
             if (probe == null)
                 throw new ArgumentNullException(nameof(probe));
             var deviceType = DetermineDeviceType(probe);

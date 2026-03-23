@@ -8,16 +8,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Bibliography;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Spreadsheet;
+// Legacy Excel persistence removed; procedures are stored in SQLite.
 
 namespace Rotronic
 {
     //TODO : save step to db instead of excel, pre-define most calibration workflows to prevent user error.
     public partial class StepEditor : Form
     {
+        private const string NewProcedureName = "New Procedure";
         // Pseudocode / Plan (detailed):
         // 1. Add a private boolean field `_hasUnsavedChanges` to track edits. (already present)
         // 2. Detect and prevent entry into accuracy cells when the corresponding
@@ -49,6 +47,10 @@ namespace Rotronic
         {
             InitializeComponent();
 
+            this.Load += StepEditor_Load;
+            this.KeyPreview = true;
+            this.KeyDown += StepEditor_KeyDown;
+
             // Wire FormClosing to check for unsaved changes
             this.FormClosing += StepEditor_FormClosing;
 
@@ -69,6 +71,96 @@ namespace Rotronic
             dataGridViewStep.CellFormatting += DataGridViewStep_CellFormatting;
 
             dataGridViewStep.CellContentClick += DataGridViewStep_CellContentClick;
+
+            comboBoxStepList.SelectedIndexChanged += comboBoxStepList_SelectedIndexChanged;
+            comboBoxStepList.TextChanged += comboBoxStepList_TextChanged;
+        }
+
+        private void comboBoxStepList_TextChanged(object sender, EventArgs e)
+        {
+            var name = (comboBoxStepList.Text ?? string.Empty).Trim();
+            buttonSave.Enabled = !string.Equals(name, NewProcedureName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void StepEditor_Load(object sender, EventArgs e)
+        {
+            try
+            {
+                Data.InitializeDatabase();
+
+                comboBoxStepList.Items.Clear();
+                comboBoxStepList.Items.Add(NewProcedureName);
+                foreach (var n in Data.GetProcedureNames())
+                    comboBoxStepList.Items.Add(n);
+
+                if (string.IsNullOrWhiteSpace(comboBoxStepList.Text))
+                    comboBoxStepList.Text = NewProcedureName;
+
+                buttonSave.Text = "Save";
+            }
+            catch
+            {
+                // keep UI usable even if DB is missing/unavailable
+                if (comboBoxStepList.Items.Count == 0)
+                    comboBoxStepList.Items.Add(NewProcedureName);
+            }
+        }
+
+        private void comboBoxStepList_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            var name = (comboBoxStepList.Text ?? string.Empty).Trim();
+            if (string.Equals(name, NewProcedureName, StringComparison.OrdinalIgnoreCase))
+            {
+                buttonSave.Text = "Save";
+                buttonSave.Enabled = false;
+                try
+                {
+                    richTextBoxDescription.Text = string.Empty;
+                    dataGridViewStep.Rows.Clear();
+                    _hasUnsavedChanges = false;
+                }
+                catch { }
+                return;
+            }
+
+            buttonSave.Enabled = true;
+
+            if (string.IsNullOrWhiteSpace(name))
+                return;
+
+            try
+            {
+                Data.InitializeDatabase();
+                var rows = Data.GetProcedureRows(name);
+                if (rows == null || rows.Count == 0)
+                    return;
+
+                dataGridViewStep.Rows.Clear();
+                richTextBoxDescription.Text = rows[0].Description ?? string.Empty;
+
+                foreach (var r in rows)
+                {
+                    int idx = dataGridViewStep.Rows.Add();
+                    var gridRow = dataGridViewStep.Rows[idx];
+                    gridRow.Cells["Step"].Value = r.Step ?? string.Empty;
+                    gridRow.Cells["SetPointRH"].Value = r.HumiditySetpoint.HasValue ? r.HumiditySetpoint.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+                    gridRow.Cells["SetPointTemp"].Value = r.TemperatureSetpointC.HasValue ? r.TemperatureSetpointC.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+                    gridRow.Cells["SoakTime"].Value = r.SoakTime ?? string.Empty;
+                    gridRow.Cells["Accuracy"].Value = r.Accuracy.HasValue ? r.Accuracy.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+                    gridRow.Cells["Adjust"].Value = r.Adjustment.HasValue ? r.Adjustment.Value : false;
+
+                    ApplySpecialRowState(idx);
+                }
+
+                ApplyAdvancedTempBlockState();
+
+                _hasUnsavedChanges = false;
+                buttonSave.Text = "Update";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Failed to load procedure: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private int FindAdjustPointColumnIndex()
@@ -137,7 +229,12 @@ namespace Rotronic
         {
             return string.Equals(stepText, "Adjust", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(stepText, "AdvancedTempStart", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(stepText, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(stepText, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "Factory", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "As-FoundStart", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "As-FoundEnd", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "As-LeftStart", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "As-LeftEnd", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool IsSpecialStepRow(int rowIndex)
@@ -247,8 +344,85 @@ namespace Rotronic
                 {
                     ApplySpecialRowState(rowIndex);
 
+                    // Enforce AdvancedTemp block restrictions after step changes.
+                    ApplyAdvancedTempBlockState();
+
                 }
             }
+        }
+
+        private bool IsAdvancedTempMarker(string stepText)
+        {
+            return string.Equals(stepText, "AdvancedTempStart", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stepText, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsBetweenAdvancedTempMarkers(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= dataGridViewStep.Rows.Count)
+                return false;
+
+            int startRow = -1;
+            int endRow = -1;
+            for (int i = 0; i < dataGridViewStep.Rows.Count; i++)
+            {
+                if (dataGridViewStep.Rows[i].IsNewRow)
+                    continue;
+
+                var stepText = GetStepText(i);
+                if (string.Equals(stepText, "AdvancedTempStart", StringComparison.OrdinalIgnoreCase))
+                    startRow = i;
+                else if (string.Equals(stepText, "AdvancedTempEnd", StringComparison.OrdinalIgnoreCase))
+                    endRow = i;
+            }
+
+            if (startRow < 0 || endRow < 0)
+                return false;
+
+            if (endRow <= startRow)
+                return false;
+
+            return rowIndex > startRow && rowIndex < endRow;
+        }
+
+        private void ApplyAdvancedTempBlockState()
+        {
+            int adjustCol = FindAdjustPointColumnIndex();
+            if (adjustCol < 0)
+                return;
+
+            for (int r = 0; r < dataGridViewStep.Rows.Count; r++)
+            {
+                var row = dataGridViewStep.Rows[r];
+                if (row == null || row.IsNewRow)
+                    continue;
+
+                var stepText = GetStepText(r);
+                if (IsAdvancedTempMarker(stepText))
+                    continue;
+
+                bool inBlock = IsBetweenAdvancedTempMarkers(r);
+                var cell = row.Cells[adjustCol];
+                if (cell == null)
+                    continue;
+
+                if (inBlock)
+                {
+                    cell.ReadOnly = true;
+                    if (cell is DataGridViewCheckBoxCell)
+                        cell.Value = false;
+                    else
+                        cell.Value = null;
+                }
+                else
+                {
+                    // Only re-enable if it isn't already disabled by other row rules.
+                    if (!IsSpecialStepRow(r))
+                        cell.ReadOnly = false;
+                }
+            }
+
+            try { dataGridViewStep.Invalidate(); } catch { }
         }
 
         private void DataGridViewStep_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
@@ -262,6 +436,13 @@ namespace Rotronic
 
             // If this row is a special step, block editing of all non-step cells.
             if (e.ColumnIndex != stepCol && IsSpecialStepRow(e.RowIndex))
+            {
+                e.Cancel = true;
+            }
+
+            // Disable adjustment checkbox between AdvancedTempStart and AdvancedTempEnd
+            int adjustCol = FindAdjustPointColumnIndex();
+            if (adjustCol >= 0 && e.ColumnIndex == adjustCol && IsBetweenAdvancedTempMarkers(e.RowIndex))
             {
                 e.Cancel = true;
             }
@@ -297,6 +478,13 @@ namespace Rotronic
             {
                 e.CellStyle.BackColor = dataGridViewStep.DefaultCellStyle.BackColor;
                 e.CellStyle.ForeColor = dataGridViewStep.DefaultCellStyle.ForeColor;
+            }
+
+            int adjustCol = FindAdjustPointColumnIndex();
+            if (adjustCol >= 0 && e.ColumnIndex == adjustCol && IsBetweenAdvancedTempMarkers(e.RowIndex))
+            {
+                e.CellStyle.BackColor = SystemColors.Control;
+                e.CellStyle.ForeColor = SystemColors.GrayText;
             }
 
         }
@@ -365,7 +553,8 @@ namespace Rotronic
 
         private void newListToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            DataLossWarning();
+            // Menu action kept for compatibility with existing designer wiring.
+            comboBoxStepList.Text = NewProcedureName;
         }
         private bool DataLossWarning()
         {
@@ -426,51 +615,10 @@ namespace Rotronic
 
         private void saveToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            // First perform data validation
-            bool isValid = DataValidation();
-            if (!isValid)
-            {
-                // Validation failed; do not proceed with save
-                return;
-            }
-
-            // Determine application exe folder and ensure "Step Files" subfolder exists
-            string exeFolder = Application.StartupPath; // safe for WinForms
-            string stepFilesFolder = Path.Combine(exeFolder, "Step Files");
-            try
-            {
-                if (!Directory.Exists(stepFilesFolder))
-                    Directory.CreateDirectory(stepFilesFolder);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "Unable to create folder for saving files: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            using (var dlg = new SaveFileDialog())
-            {
-                dlg.InitialDirectory = stepFilesFolder;
-                dlg.Filter = "Excel Workbook|*.xlsx";
-                dlg.DefaultExt = "xlsx";
-                dlg.FileName = "Steps.xlsx";
-                dlg.Title = "Save Steps as Excel Workbook";
-
-                if (dlg.ShowDialog(this) != DialogResult.OK)
-                    return;
-
-                string filePath = dlg.FileName;
-                try
-                {
-                    ExportDataGridViewToXlsx(dataGridViewStep, filePath);
-                    // If we reach here, save succeeded -> clear unsaved flag
-                    _hasUnsavedChanges = false;
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, "Failed to save file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
+            // Menu action kept for compatibility with existing designer wiring.
+            // Persist using the main Save/Update button instead of Excel.
+            if (buttonSave.Enabled)
+                buttonSave.PerformClick();
         }
 
         private bool DataValidation()
@@ -868,326 +1016,11 @@ namespace Rotronic
             }
         }
 
-        private void ExportDataGridViewToXlsx(DataGridView grid, string filePath)
-        {
-            // Create the SpreadsheetDocument
-            using (SpreadsheetDocument document = SpreadsheetDocument.Create(filePath, SpreadsheetDocumentType.Workbook))
-            {
-                // Add WorkbookPart
-                WorkbookPart workbookPart = document.AddWorkbookPart();
-                workbookPart.Workbook = new Workbook();
-
-                // Add WorksheetPart
-                WorksheetPart worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
-                SheetData sheetData = new SheetData();
-                worksheetPart.Worksheet = new Worksheet(sheetData);
-
-                // Create Sheets collection
-                Sheets sheets = document.WorkbookPart.Workbook.AppendChild(new Sheets());
-                Sheet sheet = new Sheet()
-                {
-                    Id = document.WorkbookPart.GetIdOfPart(worksheetPart),
-                    SheetId = 1,
-                    Name = "Steps"
-                };
-                sheets.Append(sheet);
-
-                // Build header row from visible columns
-                Row headerRow = new Row();
-                List<int> visibleColumnIndexes = new List<int>();
-                foreach (DataGridViewColumn col in grid.Columns)
-                {
-                    if (col.Visible)
-                    {
-                        visibleColumnIndexes.Add(col.Index);
-                        string headerText = col.HeaderText ?? col.Name ?? string.Empty;
-                        Cell headerCell = CreateTextCell(headerText);
-                        headerRow.Append(headerCell);
-                    }
-                }
-                sheetData.Append(headerRow);
-
-                // Add data rows
-                foreach (DataGridViewRow dgvRow in grid.Rows)
-                {
-                    if (dgvRow.IsNewRow) // skip the new row placeholder
-                        continue;
-
-                    Row newRow = new Row();
-                    foreach (int colIndex in visibleColumnIndexes)
-                    {
-                        object val = dgvRow.Cells[colIndex].Value;
-                        string text = val != null ? val.ToString() : string.Empty;
-                        Cell dataCell = CreateTextCell(text);
-                        newRow.Append(dataCell);
-                    }
-                    sheetData.Append(newRow);
-                }
-
-                workbookPart.Workbook.Save();
-            }
-        }
-
-        private Cell CreateTextCell(string text)
-        {
-            // Create a cell with string data type
-            return new Cell()
-            {
-                DataType = CellValues.String,
-                CellValue = new CellValue(text ?? string.Empty)
-            };
-        }
-
         private void loadListToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            var proceed = DataLossWarning();
-            if (!proceed)
-                return;
-
-            // Determine application exe folder and ensure "Step Files" subfolder exists
-            string exeFolder = Application.StartupPath;
-            string stepFilesFolder = Path.Combine(exeFolder, "Step Files");
-            try
-            {
-                if (!Directory.Exists(stepFilesFolder))
-                    Directory.CreateDirectory(stepFilesFolder);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "Unable to access folder for loading files: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            using (var dlg = new OpenFileDialog())
-            {
-                dlg.InitialDirectory = stepFilesFolder;
-                dlg.Filter = "Excel Workbook|*.xlsx";
-                dlg.DefaultExt = "xlsx";
-                dlg.Title = "Load Steps from Excel Workbook";
-                dlg.Multiselect = false;
-
-                if (dlg.ShowDialog(this) != DialogResult.OK)
-                    return;
-
-                string filePath = dlg.FileName;
-                try
-                {
-                    using (SpreadsheetDocument document = SpreadsheetDocument.Open(filePath, false))
-                    {
-                        WorkbookPart workbookPart = document.WorkbookPart;
-                        if (workbookPart == null)
-                        {
-                            MessageBox.Show(this, "The selected file is not a valid Excel workbook.", "Invalid File", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            return;
-                        }
-
-                        Sheet firstSheet = workbookPart.Workbook.Sheets.Elements<Sheet>().FirstOrDefault();
-                        if (firstSheet == null)
-                        {
-                            MessageBox.Show(this, "The workbook contains no sheets.", "Invalid File", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            return;
-                        }
-
-                        WorksheetPart worksheetPart = (WorksheetPart)workbookPart.GetPartById(firstSheet.Id);
-                        SheetData sheetData = worksheetPart.Worksheet.GetFirstChild<SheetData>();
-                        var rows = sheetData?.Elements<Row>().ToList() ?? new List<Row>();
-
-                        if (rows.Count == 0)
-                        {
-                            MessageBox.Show(this, "The workbook contains no data to load.", "Empty File", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                            return;
-                        }
-
-                        // Local helper to read cell text, handling shared strings
-                        string ReadCell(Cell cell)
-                        {
-                            if (cell == null)
-                                return string.Empty;
-
-                            string value = cell.InnerText;
-                            if (cell.DataType != null && cell.DataType.Value == CellValues.SharedString)
-                            {
-                                if (int.TryParse(value, out int ssIndex))
-                                {
-                                    var sst = workbookPart.SharedStringTablePart?.SharedStringTable;
-                                    if (sst != null)
-                                    {
-                                        var ssi = sst.Elements<SharedStringItem>().ElementAtOrDefault(ssIndex);
-                                        if (ssi != null)
-                                            return ssi.InnerText ?? string.Empty;
-                                    }
-                                }
-                                return string.Empty;
-                            }
-
-                            // For booleans, numbers or inline strings just return the inner text
-                            return value ?? string.Empty;
-                        }
-
-                        // Build list of visible column indexes and expected headers (order matters)
-                        List<int> visibleColumnIndexes = new List<int>();
-                        List<string> expectedHeaders = new List<string>();
-                        foreach (DataGridViewColumn col in dataGridViewStep.Columns)
-                        {
-                            if (col.Visible)
-                            {
-                                visibleColumnIndexes.Add(col.Index);
-                                string headerText = col.HeaderText ?? col.Name ?? string.Empty;
-                                expectedHeaders.Add(headerText.Trim());
-                            }
-                        }
-
-                        // Read header row (first row)
-                        Row headerRow = rows[0];
-                        var headerCells = headerRow.Elements<Cell>().ToList();
-                        List<string> fileHeaders = headerCells.Select(c => ReadCell(c).Trim()).ToList();
-
-                        // Validate header count matches visible columns
-                        if (fileHeaders.Count != expectedHeaders.Count)
-                        {
-                            MessageBox.Show(this, "The Excel file format does not match the expected column layout (column count mismatch).", "Format Mismatch", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            return;
-                        }
-
-                        // Validate header texts (case-insensitive, trimmed)
-                        for (int i = 0; i < expectedHeaders.Count; i++)
-                        {
-                            string a = expectedHeaders[i] ?? string.Empty;
-                            string b = fileHeaders[i] ?? string.Empty;
-                            if (!string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase))
-                            {
-                                MessageBox.Show(this, $"The Excel header \"{b}\" does not match the expected column \"{a}\".\nLoad aborted.", "Format Mismatch", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return;
-                            }
-                        }
-
-                        // Validation passed - prepare to load rows
-                        // If bound to a DataTable, get reference
-                        DataTable targetTable = null;
-                        if (dataGridViewStep.DataSource is DataTable dt)
-                        {
-                            targetTable = dt;
-                        }
-                        else if (dataGridViewStep.DataSource is BindingSource bs && bs.DataSource is DataTable bsTable)
-                        {
-                            targetTable = bsTable;
-                        }
-
-                        // If bound to DataTable, verify mapping from visible DataGridView columns to DataColumn exists
-                        Dictionary<int, string> columnIndexToDataColumnName = new Dictionary<int, string>();
-                        if (targetTable != null)
-                        {
-                            foreach (int colIndex in visibleColumnIndexes)
-                            {
-                                var dgvCol = dataGridViewStep.Columns[colIndex];
-                                string tryName = dgvCol.Name ?? dgvCol.HeaderText ?? string.Empty;
-                                if (targetTable.Columns.Contains(tryName))
-                                {
-                                    columnIndexToDataColumnName[colIndex] = tryName;
-                                    continue;
-                                }
-
-                                // Try header text as column name
-                                string header = dgvCol.HeaderText ?? string.Empty;
-                                if (targetTable.Columns.Contains(header))
-                                {
-                                    columnIndexToDataColumnName[colIndex] = header;
-                                    continue;
-                                }
-
-                                // No match found -> incompatible
-                                MessageBox.Show(this, $"The DataTable bound to the grid does not contain a matching column for \"{dgvCol.HeaderText}\".\nLoad aborted.", "Format Mismatch", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return;
-                            }
-                        }
-
-                        // Clear existing data
-                        ClearData();
-
-                        // Helper to parse bool-like strings
-                        Func<string, bool> parseBool = s =>
-                        {
-                            if (string.IsNullOrWhiteSpace(s))
-                                return false;
-                            var t = s.Trim().ToLowerInvariant();
-                            return t == "true" || t == "1" || t == "yes" || t == "y" || t == "x" || t == "checked";
-                        };
-
-                        // Load rows from Excel into the grid or DataTable
-                        foreach (var dataRow in rows.Skip(1))
-                        {
-                            var cells = dataRow.Elements<Cell>().ToList();
-                            // Build array of cell text values corresponding to expectedHeaders order
-                            string[] values = new string[expectedHeaders.Count];
-                            for (int i = 0; i < expectedHeaders.Count; i++)
-                            {
-                                // If the cell at position i exists, read it, otherwise empty string
-                                if (i < cells.Count)
-                                    values[i] = ReadCell(cells[i]);
-                                else
-                                    values[i] = string.Empty;
-                            }
-
-                            if (targetTable == null)
-                            {
-                                // Unbound grid: create an object[] matching visible columns and convert checkbox columns to bool
-                                object[] rowValues = new object[visibleColumnIndexes.Count];
-                                for (int idx = 0; idx < visibleColumnIndexes.Count; idx++)
-                                {
-                                    int dgvColIndex = visibleColumnIndexes[idx];
-                                    var dgvCol = dataGridViewStep.Columns[dgvColIndex];
-
-                                    string raw = values[idx] ?? string.Empty;
-
-                                    if (dgvCol is DataGridViewCheckBoxColumn)
-                                    {
-                                        rowValues[idx] = parseBool(raw);
-                                    }
-                                    else
-                                    {
-                                        rowValues[idx] = raw;
-                                    }
-                                }
-
-                                dataGridViewStep.Rows.Add(rowValues);
-                            }
-                            else
-                            {
-                                // Bound to DataTable: create DataRow and set mapped columns, respecting boolean DataColumns
-                                DataRow newRow = targetTable.NewRow();
-                                for (int idx = 0; idx < visibleColumnIndexes.Count; idx++)
-                                {
-                                    int dgvColIndex = visibleColumnIndexes[idx];
-                                    string dataColName = columnIndexToDataColumnName[dgvColIndex];
-                                    var dgvCol = dataGridViewStep.Columns[dgvColIndex];
-
-                                    string raw = values[idx] ?? string.Empty;
-
-                                    var targetCol = targetTable.Columns[dataColName];
-                                    if (targetCol != null && targetCol.DataType == typeof(bool))
-                                    {
-                                        // assign parsed boolean (empty => false)
-                                        newRow[dataColName] = parseBool(raw);
-                                    }
-                                    else
-                                    {
-                                        if (string.IsNullOrEmpty(raw))
-                                            newRow[dataColName] = DBNull.Value;
-                                        else
-                                            newRow[dataColName] = raw;
-                                    }
-                                }
-                                targetTable.Rows.Add(newRow);
-                            }
-
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, "Failed to load file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
+            // Menu action kept for compatibility with existing designer wiring.
+            // Loading from DB is done by selecting a procedure from the dropdown.
+            comboBoxStepList.DroppedDown = true;
         }
 
         private bool GridHasData()
@@ -1445,6 +1278,144 @@ namespace Rotronic
             var steps = BuildStepListFromGrid();
             var calForm = new CalibrationSetupFrm(steps);
             calForm.Show(this);
+        }
+
+        private void buttonSave_Click(object sender, EventArgs e)
+        {
+            if (buttonSave.Text == "Save")
+            {
+
+                // validate data
+                if (!GridHasData())
+                {
+                    MessageBox.Show(this, "No steps to save.", "Save", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var name = (comboBoxStepList.Text ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    MessageBox.Show(this, "Enter a procedure name.", "Save", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    comboBoxStepList.Focus();
+                    return;
+                }
+
+                if (string.Equals(name, NewProcedureName, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show(this, "'" + NewProcedureName + "' is reserved. Enter a different procedure name.", "Save", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    comboBoxStepList.Focus();
+                    return;
+                }
+
+                var steps = BuildStepListFromGrid();
+                if (steps.Count == 0)
+                {
+                    MessageBox.Show(this, "No steps to save.", "Save", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                try
+                {
+                    Data.InitializeDatabase();
+                    Data.SaveProcedure(name, richTextBoxDescription.Text, steps);
+
+                    comboBoxStepList.Items.Clear();
+                    comboBoxStepList.Items.Add(NewProcedureName);
+                    foreach (var n in Data.GetProcedureNames())
+                        comboBoxStepList.Items.Add(n);
+                    comboBoxStepList.Text = name;
+
+                    _hasUnsavedChanges = false;
+                    buttonSave.Text = "Update";
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Failed to save procedure: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            if (buttonSave.Text == "Update")
+            {
+                // validate data
+                if (!GridHasData())
+                {
+                    MessageBox.Show(this, "No steps to update.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var name = (comboBoxStepList.Text ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    MessageBox.Show(this, "Select a procedure to update.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                if (string.Equals(name, NewProcedureName, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show(this, "Select a saved procedure name to update.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var steps = BuildStepListFromGrid();
+                if (steps.Count == 0)
+                {
+                    MessageBox.Show(this, "No steps to update.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                try
+                {
+                    Data.InitializeDatabase();
+                    Data.SaveProcedure(name, richTextBoxDescription.Text, steps);
+                    _hasUnsavedChanges = false;
+
+                    // keep in Update mode
+                    if (!comboBoxStepList.Items.Contains(name))
+                        comboBoxStepList.Items.Add(name);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Failed to update procedure: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void StepEditor_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Shift && e.KeyCode == Keys.Delete)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+
+                var name = (comboBoxStepList.Text ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(name) || string.Equals(name, NewProcedureName, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                var result = MessageBox.Show(this, "Delete procedure '" + name + "'?", "Delete", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                if (result != DialogResult.OK)
+                    return;
+
+                try
+                {
+                    Data.InitializeDatabase();
+                    Data.DeleteProcedure(name);
+
+                    comboBoxStepList.Items.Clear();
+                    comboBoxStepList.Items.Add(NewProcedureName);
+                    foreach (var n in Data.GetProcedureNames())
+                        comboBoxStepList.Items.Add(n);
+
+                    comboBoxStepList.Text = NewProcedureName;
+                    richTextBoxDescription.Text = string.Empty;
+                    dataGridViewStep.Rows.Clear();
+                    _hasUnsavedChanges = false;
+                    buttonSave.Text = "Save";
+                    buttonSave.Enabled = false;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Failed to delete procedure: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
         }
     }
 }

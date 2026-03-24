@@ -13,6 +13,72 @@ namespace Rotronic
     {
         private Main _main;
 
+        private static bool IsCountFieldName(string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName))
+                return false;
+            return fieldName.IndexOf("Count", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsTempOrHumidityFieldName(string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName))
+                return false;
+            if (IsCountFieldName(fieldName))
+                return false;
+
+            return fieldName.IndexOf("Temp", StringComparison.OrdinalIgnoreCase) >= 0
+                || fieldName.IndexOf("Temperature", StringComparison.OrdinalIgnoreCase) >= 0
+                || fieldName.IndexOf("Hum", StringComparison.OrdinalIgnoreCase) >= 0
+                || fieldName.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string FormatToTwoDecimalsOrOriginal(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return raw ?? string.Empty;
+
+            if (double.TryParse(raw.Trim(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands,
+                System.Globalization.CultureInfo.InvariantCulture, out var d))
+            {
+                return d.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (double.TryParse(raw.Trim(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands,
+                System.Globalization.CultureInfo.CurrentCulture, out d))
+            {
+                return d.ToString("0.00", System.Globalization.CultureInfo.CurrentCulture);
+            }
+
+            return raw;
+        }
+
+        private static void ForceTwoDecimalFormattingOnListView(ListView lv)
+        {
+            if (lv == null)
+                return;
+
+            try
+            {
+                for (int c = 0; c < lv.Columns.Count; c++)
+                {
+                    var colName = lv.Columns[c]?.Name ?? string.Empty;
+                    if (!IsTempOrHumidityFieldName(colName))
+                        continue;
+
+                    foreach (ListViewItem item in lv.Items)
+                    {
+                        if (item == null)
+                            continue;
+
+                        if (c >= 0 && c < item.SubItems.Count)
+                            item.SubItems[c].Text = FormatToTwoDecimalsOrOriginal(item.SubItems[c].Text);
+                    }
+                }
+            }
+            catch { }
+        }
+
         // Checkbox state is persisted on the underlying device objects via their `Selected` property.
 
         // suppression flags to avoid recursion when programmatically changing checks
@@ -74,6 +140,10 @@ namespace Rotronic
                 CopyProbesFromMain(_main);
                 CopyMirrorsFromMain(_main);
                 CopyChambersFromMain(_main);
+
+                ForceTwoDecimalFormattingOnListView(listViewRotProbe);
+                ForceTwoDecimalFormattingOnListView(listViewMirror);
+                ForceTwoDecimalFormattingOnListView(listViewChamber);
             }
         }
 
@@ -96,16 +166,19 @@ namespace Rotronic
         private void Main_ProbesRefreshed(object sender, EventArgs e)
         {
             CopyProbesFromMain(sender as Main);
+            ForceTwoDecimalFormattingOnListView(listViewRotProbe);
         }
 
         private void Main_MirrorsRefreshed(object sender, EventArgs e)
         {
             CopyMirrorsFromMain(sender as Main);
+            ForceTwoDecimalFormattingOnListView(listViewMirror);
         }
 
         private void Main_ChambersRefreshed(object sender, EventArgs e)
         {
             CopyChambersFromMain(sender as Main);
+            ForceTwoDecimalFormattingOnListView(listViewChamber);
         }
 
         private static string GetChamberIpFromSetupItem(ListViewItem item)

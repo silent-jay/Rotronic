@@ -50,4 +50,19 @@ Misc
 - Probe cal and due dates not updating.
 - Reverse traceability from mirror/chamber to probes used.
 - Force decimal Precision across application.
-*/
+        UI elements with bad precision:
+            ListViewProb (main)
+            ListViewMirror (main)
+            ListViewChamber (main)
+            probeInventoryCalibrationData - datagridviewstep and datagridviewsamples
+            Step Editor
+            CalibrationSetup - all list views
+            CalProgressFrm DataGridView
+
+after change:
+   
+
+            
+            
+            
+*/   

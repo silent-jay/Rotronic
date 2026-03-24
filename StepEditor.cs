@@ -72,8 +72,65 @@ namespace Rotronic
 
             dataGridViewStep.CellContentClick += DataGridViewStep_CellContentClick;
 
+            try
+            {
+                dataGridViewStep.DataBindingComplete -= DataGridViewStep_DataBindingComplete;
+                dataGridViewStep.DataBindingComplete += DataGridViewStep_DataBindingComplete;
+            }
+            catch { }
+
+            try
+            {
+                ApplyTwoDecimalFormatting(dataGridViewStep);
+            }
+            catch { }
+
             comboBoxStepList.SelectedIndexChanged += comboBoxStepList_SelectedIndexChanged;
             comboBoxStepList.TextChanged += comboBoxStepList_TextChanged;
+        }
+
+        private void DataGridViewStep_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            ApplyTwoDecimalFormatting(dataGridViewStep);
+        }
+
+        private static void ApplyTwoDecimalFormatting(DataGridView grid)
+        {
+            if (grid == null)
+                return;
+
+            try
+            {
+                foreach (DataGridViewColumn c in grid.Columns)
+                {
+                    if (c == null)
+                        continue;
+
+                    var name = (c.Name ?? string.Empty);
+                    var header = (c.HeaderText ?? string.Empty);
+                    var combined = (name + "|" + header);
+
+                    // Accuracy should always be 2 decimals.
+                    if (combined.IndexOf("Accuracy", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        c.DefaultCellStyle.Format = "0.00";
+                        continue;
+                    }
+
+                    // Temp/Humidity columns shown to the user should be 2 decimals; count fields excluded.
+                    if (combined.IndexOf("Count", StringComparison.OrdinalIgnoreCase) >= 0)
+                        continue;
+
+                    if (combined.IndexOf("Temp", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Temperature", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Hum", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        c.DefaultCellStyle.Format = "0.00";
+                    }
+                }
+            }
+            catch { }
         }
 
         private void comboBoxStepList_TextChanged(object sender, EventArgs e)
@@ -486,6 +543,36 @@ namespace Rotronic
                 e.CellStyle.BackColor = SystemColors.Control;
                 e.CellStyle.ForeColor = SystemColors.GrayText;
             }
+
+            // Force 2 decimals for temp/humidity/accuracy display even if the underlying cell is a string.
+            try
+            {
+                var col = dataGridViewStep.Columns[e.ColumnIndex];
+                var combined = ((col?.Name ?? string.Empty) + "|" + (col?.HeaderText ?? string.Empty));
+
+                if (combined.IndexOf("Count", StringComparison.OrdinalIgnoreCase) < 0
+                    && (combined.IndexOf("Accuracy", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Temp", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Temperature", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Hum", StringComparison.OrdinalIgnoreCase) >= 0
+                        || combined.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    if (e.Value != null && e.Value != DBNull.Value)
+                    {
+                        if (double.TryParse(Convert.ToString(e.Value, System.Globalization.CultureInfo.InvariantCulture),
+                            System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands,
+                            System.Globalization.CultureInfo.InvariantCulture, out var d)
+                            || double.TryParse(Convert.ToString(e.Value, System.Globalization.CultureInfo.CurrentCulture),
+                            System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands,
+                            System.Globalization.CultureInfo.CurrentCulture, out d))
+                        {
+                            e.Value = d.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                            e.FormattingApplied = true;
+                        }
+                    }
+                }
+            }
+            catch { }
 
         }
 

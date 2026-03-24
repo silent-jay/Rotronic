@@ -15,6 +15,54 @@ namespace Rotronic
 {
     public partial class Main : Form
     {
+        private static bool IsCountFieldName(string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName))
+                return false;
+
+            var f = fieldName.Trim();
+            return f.IndexOf("Count", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsTempOrHumidityFieldName(string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(fieldName))
+                return false;
+
+            var f = fieldName.Trim();
+
+            // Temperature/humidity fields only; exclude counts.
+            if (IsCountFieldName(f))
+                return false;
+
+            return f.IndexOf("Temp", StringComparison.OrdinalIgnoreCase) >= 0
+                || f.IndexOf("Temperature", StringComparison.OrdinalIgnoreCase) >= 0
+                || f.IndexOf("Hum", StringComparison.OrdinalIgnoreCase) >= 0
+                || f.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string FormatTempHumidityValueIfNeeded(string fieldName, object value)
+        {
+            if (value == null)
+                return string.Empty;
+
+            // If we know the field is Temp/Humidity (non-count), force two decimals.
+            if (IsTempOrHumidityFieldName(fieldName))
+            {
+                try
+                {
+                    // Handle numeric and numeric-like strings.
+                    var d = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                    return d.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                }
+                catch
+                {
+                    // Fallback to raw text
+                }
+            }
+
+            return value.ToString();
+        }
         private readonly HashSet<string> _promptedNewMirrors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _promptedNewChambers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Timer to refresh listViewRotProbe periodically
@@ -251,7 +299,7 @@ namespace Rotronic
 
             if (ok)
             {
-                item.SubItems[subIndex].Text = value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                item.SubItems[subIndex].Text = value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
                 try { listViewChamber.Invalidate(bounds); } catch { }
             }
         }
@@ -733,7 +781,7 @@ namespace Rotronic
                         string txt = string.Empty;
                         if (prop != null)
                         {
-                            try { var v = prop.GetValue(cNew); txt = v?.ToString() ?? string.Empty; } catch { txt = string.Empty; }
+                            try { var v = prop.GetValue(cNew); txt = v == null ? string.Empty : FormatTempHumidityValueIfNeeded(kv.Key.ToString(), v); } catch { txt = string.Empty; }
                         }
 
                         if (colIdx < item.SubItems.Count)
@@ -771,7 +819,7 @@ namespace Rotronic
                     foreach (var kv in visibleFields)
                     {
                         var prop = propCache[kv.Key];
-                        try { var v = prop?.GetValue(c); values.Add(v?.ToString() ?? string.Empty); } catch { values.Add(string.Empty); }
+                        try { var v = prop?.GetValue(c); values.Add(v == null ? string.Empty : FormatTempHumidityValueIfNeeded(kv.Key.ToString(), v)); } catch { values.Add(string.Empty); }
                     }
                     var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
                     for (int i = 1; i < values.Count; i++) lvi.SubItems.Add(values[i]);
@@ -1023,7 +1071,7 @@ namespace Rotronic
                                     try
                                     {
                                         var v = prop.GetValue(itemObj);
-                                        values.Add(v?.ToString() ?? string.Empty);
+                                        values.Add(v == null ? string.Empty : FormatTempHumidityValueIfNeeded(fieldObj.ToString(), v));
                                     }
                                     catch
                                     {
@@ -1177,7 +1225,7 @@ namespace Rotronic
                         string txt = string.Empty;
                         if (prop != null)
                         {
-                            try { var v = prop.GetValue(mNew); txt = v?.ToString() ?? string.Empty; } catch { txt = string.Empty; }
+                            try { var v = prop.GetValue(mNew); txt = v == null ? string.Empty : FormatTempHumidityValueIfNeeded(kv.Key.ToString(), v); } catch { txt = string.Empty; }
                         }
 
                         if (colIdx < item.SubItems.Count)
@@ -1207,7 +1255,7 @@ namespace Rotronic
                     foreach (var kv in visibleFields)
                     {
                         var prop = propCache[kv.Key];
-                        try { var v = prop?.GetValue(m); values.Add(v?.ToString() ?? string.Empty); } catch { values.Add(string.Empty); }
+                        try { var v = prop?.GetValue(m); values.Add(v == null ? string.Empty : FormatTempHumidityValueIfNeeded(kv.Key.ToString(), v)); } catch { values.Add(string.Empty); }
                     }
                     var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
                     for (int i = 1; i < values.Count; i++) lvi.SubItems.Add(values[i]);
@@ -1450,7 +1498,7 @@ namespace Rotronic
                                     try
                                     {
                                         var v = prop.GetValue(itemObj);
-                                        values.Add(v?.ToString() ?? string.Empty);
+                                        values.Add(v == null ? string.Empty : FormatTempHumidityValueIfNeeded(field.ToString(), v));
                                     }
                                     catch
                                     {
@@ -1558,7 +1606,7 @@ namespace Rotronic
                         string txt = string.Empty;
                         if (prop != null)
                         {
-                            try { var v = prop.GetValue(pNew); txt = v?.ToString() ?? string.Empty; } catch { txt = string.Empty; }
+                            try { var v = prop.GetValue(pNew); txt = v == null ? string.Empty : FormatTempHumidityValueIfNeeded(kv.Key.ToString(), v); } catch { txt = string.Empty; }
                         }
 
                         if (colIdx < item.SubItems.Count)
@@ -1598,7 +1646,7 @@ namespace Rotronic
                     foreach (var kv in visibleFields)
                     {
                         var prop = propCache[kv.Key];
-                        try { var v = prop?.GetValue(p); values.Add(v?.ToString() ?? string.Empty); } catch { values.Add(string.Empty); }
+                        try { var v = prop?.GetValue(p); values.Add(v == null ? string.Empty : FormatTempHumidityValueIfNeeded(kv.Key.ToString(), v)); } catch { values.Add(string.Empty); }
                     }
                     var lvi = new ListViewItem(values.Count > 0 ? values[0] : string.Empty);
                     for (int i = 1; i < values.Count; i++) lvi.SubItems.Add(values[i]);

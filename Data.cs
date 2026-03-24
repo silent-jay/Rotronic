@@ -12,6 +12,9 @@ namespace Rotronic
     {
         private const string DatabaseFileName = "rotronic.db";
 
+        private const string ProcedureTableName = "ProcedureDef";
+        private const string ProcedureStepTableName = "ProcedureStep";
+
         
         public static string GetDatabasePath()
         {
@@ -20,6 +23,313 @@ namespace Rotronic
             Directory.CreateDirectory(dataDir);
             return Path.Combine(dataDir, DatabaseFileName);
         }
+
+        private static void EnsureProcedureTables(SQLiteConnection conn)
+        {
+            if (conn == null)
+                throw new ArgumentNullException(nameof(conn));
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"CREATE TABLE IF NOT EXISTS " + ProcedureTableName + @" (
+    ProcedureId INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT NOT NULL,
+    Description TEXT NULL,
+    CreatedUtc TEXT NULL,
+    UpdatedUtc TEXT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_" + ProcedureTableName + @"_Name ON " + ProcedureTableName + @"(Name);
+
+CREATE TABLE IF NOT EXISTS " + ProcedureStepTableName + @" (
+    ProcedureStepId INTEGER PRIMARY KEY AUTOINCREMENT,
+    ProcedureId INTEGER NOT NULL,
+    StepOrder INTEGER NOT NULL,
+    Step TEXT NULL,
+    HumiditySetpoint REAL NULL,
+    TemperatureSetpointC REAL NULL,
+    SoakTime TEXT NULL,
+    Accuracy REAL NULL,
+    Adjustment INTEGER NULL,
+    FOREIGN KEY(ProcedureId) REFERENCES " + ProcedureTableName + @"(ProcedureId) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_" + ProcedureStepTableName + @"_Proc_Order ON " + ProcedureStepTableName + @"(ProcedureId, StepOrder);
+CREATE INDEX IF NOT EXISTS IX_" + ProcedureStepTableName + @"_Proc ON " + ProcedureStepTableName + @"(ProcedureId);";
+                cmd.ExecuteNonQuery();
+            }
+
+
+        }
+
+        private static void SeedProceduresFromCsvIfEmpty(SQLiteConnection conn)
+        {
+            if (conn == null)
+                throw new ArgumentNullException(nameof(conn));
+
+            long count;
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(1) FROM " + ProcedureTableName + ";";
+                count = (long)cmd.ExecuteScalar();
+            }
+
+            if (count > 0)
+                return;
+
+            var seed = GetEmbeddedProcedureSeed();
+            var defs = seed.Definitions;
+            var steps = seed.Steps;
+
+            using (var tx = conn.BeginTransaction())
+            {
+                // Create a mapping from old ProcedureId in CSV to new DB ProcedureId.
+                var idMap = new Dictionary<long, long>();
+
+                using (var insProc = conn.CreateCommand())
+                {
+                    insProc.Transaction = tx;
+                    insProc.CommandText = @"INSERT INTO " + ProcedureTableName + @"(Name, Description, CreatedUtc, UpdatedUtc)
+VALUES(@Name, @Description, @CreatedUtc, @UpdatedUtc);
+SELECT last_insert_rowid();";
+
+                    var pName = insProc.Parameters.Add("@Name", DbType.String);
+                    var pDesc = insProc.Parameters.Add("@Description", DbType.String);
+                    var pCreated = insProc.Parameters.Add("@CreatedUtc", DbType.String);
+                    var pUpdated = insProc.Parameters.Add("@UpdatedUtc", DbType.String);
+
+                    foreach (var row in defs)
+                    {
+                        // Expected: ProcedureId, Name, Description, CreatedUtc, UpdatedUtc
+                        if (row.Length < 2)
+                            continue;
+
+                        if (!long.TryParse(row[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var oldId))
+                            continue;
+
+                        var name = (row[1] ?? string.Empty).Trim();
+                        if (string.IsNullOrWhiteSpace(name))
+                            continue;
+
+                        var desc = (row.Length > 2 ? row[2] : null) ?? string.Empty;
+                        var createdUtc = (row.Length > 3 ? row[3] : null);
+                        var updatedUtc = (row.Length > 4 ? row[4] : null);
+
+                        pName.Value = name;
+                        pDesc.Value = desc;
+                        pCreated.Value = string.IsNullOrWhiteSpace(createdUtc) ? (object)DBNull.Value : createdUtc.Trim();
+                        pUpdated.Value = string.IsNullOrWhiteSpace(updatedUtc) ? (object)DBNull.Value : updatedUtc.Trim();
+
+                        long newId = (long)insProc.ExecuteScalar();
+                        idMap[oldId] = newId;
+                    }
+                }
+
+                if (steps.Count > 0)
+                {
+                    using (var insStep = conn.CreateCommand())
+                    {
+                        insStep.Transaction = tx;
+                        insStep.CommandText = @"INSERT INTO " + ProcedureStepTableName + @"(ProcedureId, StepOrder, Step, HumiditySetpoint, TemperatureSetpointC, SoakTime, Accuracy, Adjustment)
+VALUES(@ProcedureId, @StepOrder, @Step, @HumiditySetpoint, @TemperatureSetpointC, @SoakTime, @Accuracy, @Adjustment);";
+
+                        var pProcId = insStep.Parameters.Add("@ProcedureId", DbType.Int64);
+                        var pOrder = insStep.Parameters.Add("@StepOrder", DbType.Int32);
+                        var pStep = insStep.Parameters.Add("@Step", DbType.String);
+                        var pHum = insStep.Parameters.Add("@HumiditySetpoint", DbType.Double);
+                        var pTemp = insStep.Parameters.Add("@TemperatureSetpointC", DbType.Double);
+                        var pSoak = insStep.Parameters.Add("@SoakTime", DbType.String);
+                        var pAcc = insStep.Parameters.Add("@Accuracy", DbType.Double);
+                        var pAdj = insStep.Parameters.Add("@Adjustment", DbType.Int32);
+
+                        foreach (var row in steps)
+                        {
+                            // Expected: ProcedureStepId, ProcedureId, StepOrder, Step, HumiditySetpoint, TemperatureSetpointC, SoakTime, Accuracy, Adjustment
+                            if (row.Length < 3)
+                                continue;
+
+                            if (!long.TryParse(row[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var oldProcedureId))
+                                continue;
+                            if (!idMap.TryGetValue(oldProcedureId, out var newProcedureId))
+                                continue;
+                            if (!int.TryParse(row[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var stepOrder))
+                                continue;
+
+                            pProcId.Value = newProcedureId;
+                            pOrder.Value = stepOrder;
+                            pStep.Value = (row.Length > 3 && !string.IsNullOrWhiteSpace(row[3])) ? (object)row[3].Trim() : DBNull.Value;
+
+                            pHum.Value = TryParseCsvDoubleOrDbNull(row, 4);
+                            pTemp.Value = TryParseCsvDoubleOrDbNull(row, 5);
+                            pSoak.Value = (row.Length > 6 && !string.IsNullOrWhiteSpace(row[6])) ? (object)row[6].Trim() : DBNull.Value;
+                            pAcc.Value = TryParseCsvDoubleOrDbNull(row, 7);
+
+                            int adj = 0;
+                            if (row.Length > 8 && int.TryParse((row[8] ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var adjInt))
+                                adj = adjInt;
+                            pAdj.Value = adj;
+
+                            insStep.ExecuteNonQuery();
+                        }
+                    }
+                }
+
+                tx.Commit();
+            }
+        }
+
+        private sealed class ProcedureSeed
+        {
+            public List<string[]> Definitions { get; } = new List<string[]>();
+            public List<string[]> Steps { get; } = new List<string[]>();
+        }
+
+        private static ProcedureSeed GetEmbeddedProcedureSeed()
+        {
+            // Generated from the current exported CSVs. These are only used when the database is empty.
+            // Format matches the CSV import expectations.
+            var seed = new ProcedureSeed();
+
+            // procedureDef.csv: ProcedureId,Name,Description,CreatedUtc,UpdatedUtc
+            seed.Definitions.Add(new[] { "1", "Adjust Humidity", "Humidity Adjustment. Longer soak times are to ensure measurement is stable, to avoid bad calibration coefficients.", "2026-03-24T05:57:00.9639569Z", "2026-03-24T05:57:00.9639569Z" });
+            seed.Definitions.Add(new[] { "2", "Adjust Humidity Precision Linearity", "Additional test points added to improve linearity of the instrument - reserve where wide humidity range is expected, such as control probes for chambers.", "2026-03-24T05:57:00.9649571Z", "2026-03-24T05:57:00.9649571Z" });
+            seed.Definitions.Add(new[] { "3", "Adjust Temperature Single Point", "Adjusts temperature at a single test point. This is the default method for the rotronic hardware.", "2026-03-24T05:57:00.9649571Z", "2026-03-24T05:57:00.9649571Z" });
+            seed.Definitions.Add(new[] { "4", "Advanced Temperature Adjustment", "Minimum of four temperature points required, with one as close to 0°C as reasonably achievable are required for this. This test collects all set points and generates new PT100 coefficients specific to the probe being tested.\nMore test points will improve accuracy to some extent, but they should be evenly distrubuted to avoid biasing the temperature curve.", "2026-03-24T05:57:00.9649571Z", "2026-03-24T05:57:00.9649571Z" });
+            seed.Definitions.Add(new[] { "5", "As-Found Humidity Only", "This test will collect as-found data for the humidity detector for the probe. No adjustments will be made.", "2026-03-24T05:57:00.9649571Z", "2026-03-24T05:57:00.9649571Z" });
+            seed.Definitions.Add(new[] { "6", "As-Found Temperature Only", "This test will collect as-found data for the temperature detector of the probe. No adjustments will be made", "2026-03-24T05:57:00.9649571Z", "2026-03-24T05:57:00.9649571Z" });
+            seed.Definitions.Add(new[] { "7", "As-Found Temperature and Humidity", "Temperature and Humidity are tested, no adjustments are made", "2026-03-24T05:57:00.9659572Z", "2026-03-24T05:57:00.9659572Z" });
+            seed.Definitions.Add(new[] { "8", "As-Left Humidity", "As-Left Humidity data.", "2026-03-24T05:57:00.9659572Z", "2026-03-24T05:57:00.9659572Z" });
+            seed.Definitions.Add(new[] { "9", "As-Left Temperature Only", "As-Left Temperature data", "2026-03-24T05:57:00.9659572Z", "2026-03-24T05:57:00.9659572Z" });
+            seed.Definitions.Add(new[] { "10", "As-Left Temperature and Humidity", "As-Left Temperature and Humdity data", "2026-03-24T05:57:00.9659572Z", "2026-03-24T05:57:00.9659572Z" });
+            seed.Definitions.Add(new[] { "11", "Full Calibration with Advanced Temperature Adjustment", "A full calibration, including custom coefficients for the PT100 probe.\nFirst collects as-found data. Runs adjustment for temperature, saves coefficients, then runs adjustment for Humidity.\nFinally collects as-left data. This procedure is likely to take several hours. 0 setpoints for temperature may have to be tweaked based on capabilities of the chamber.\nImportant: Temperature should be adjusted before humidity. These should not be done in one step, as this will affect the humidity accuracy.", "2026-03-24T05:57:00.9659572Z", "2026-03-24T05:57:00.9659572Z" });
+            seed.Definitions.Add(new[] { "12", "Full Calibration with single temperature adjustment", "Full calibration with adjustment. Only a single point adjustment is performed for temperature here. This is best if the temperature is expected to remain consistently close to a single set point. The adjust step command saves the test points to the probe. Temperature adjust point is done first and adjustment step done to prevent issues with temperature accuracy affecting humidity.", "2026-03-24T05:57:00.9659572Z", "2026-03-24T05:57:00.9659572Z" });
+
+            // ProcedureSteps.csv
+            seed.Steps.Add(new[] { "1", "1", "1", "Humidity", "10", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "2", "1", "2", "Humidity", "50", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "3", "1", "3", "Humidity", "90", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "4", "1", "4", "Adjust", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "5", "2", "1", "Humidity", "10", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "6", "2", "2", "Humidity", "20", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "7", "2", "3", "Humidity", "30", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "8", "2", "4", "Humidity", "40", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "9", "2", "5", "Humidity", "50", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "10", "2", "6", "Humidity", "60", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "11", "2", "7", "Humidity", "70", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "12", "2", "8", "Humidity", "80", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "13", "2", "9", "Humidity", "90", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "14", "2", "10", "Adjust", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "15", "3", "1", "Temperature", "20", "23", "00:30", "", "1" });
+            seed.Steps.Add(new[] { "16", "3", "2", "Adjust", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "17", "4", "1", "AdvancedTempStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "18", "4", "2", "Temperature", "20", "0", "00:15", "0", "0" });
+            seed.Steps.Add(new[] { "19", "4", "3", "Temperature", "20", "12.5", "00:15", "0", "0" });
+            seed.Steps.Add(new[] { "20", "4", "4", "Temperature", "20", "25", "00:15", "0", "0" });
+            seed.Steps.Add(new[] { "21", "4", "5", "Temperature", "20", "37.5", "00:15", "0", "0" });
+            seed.Steps.Add(new[] { "22", "4", "6", "Temperature", "20", "50", "00:15", "0", "0" });
+            seed.Steps.Add(new[] { "23", "4", "7", "AdvancedTempEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "24", "5", "1", "As-FoundStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "25", "5", "2", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "26", "5", "3", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "27", "5", "4", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "28", "5", "5", "As-FoundEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "29", "6", "1", "As-FoundStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "30", "6", "2", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "31", "6", "3", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "32", "6", "4", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "33", "6", "5", "As-FoundEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "34", "7", "1", "As-FoundStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "35", "7", "2", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "36", "7", "3", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "37", "7", "4", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "38", "7", "5", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "39", "7", "6", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "40", "7", "7", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "41", "7", "8", "As-FoundEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "42", "8", "1", "As-LeftStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "43", "8", "2", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "44", "8", "3", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "45", "8", "4", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "46", "8", "5", "As-LeftEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "47", "9", "1", "As-LeftStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "48", "9", "2", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "49", "9", "3", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "50", "9", "4", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "51", "9", "5", "As-LeftEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "52", "10", "1", "As-LeftStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "53", "10", "2", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "54", "10", "3", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "55", "10", "4", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "56", "10", "5", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "57", "10", "6", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "58", "10", "7", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "59", "10", "8", "As-LeftEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "60", "11", "1", "As-FoundStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "61", "11", "2", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "62", "11", "3", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "63", "11", "4", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "64", "11", "5", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "65", "11", "6", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "66", "11", "7", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "67", "11", "8", "As-FoundEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "68", "11", "9", "AdvancedTempStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "69", "11", "10", "Temperature", "20", "0", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "70", "11", "11", "Temperature", "20", "12.5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "71", "11", "12", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "72", "11", "13", "Temperature", "20", "37.5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "73", "11", "14", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "74", "11", "15", "AdvancedTempEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "75", "11", "16", "Humidity", "10", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "76", "11", "17", "Humidity", "50", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "77", "11", "18", "Humidity", "90", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "78", "11", "19", "Adjust", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "79", "11", "20", "As-LeftStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "80", "11", "21", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "81", "11", "22", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "82", "11", "23", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "83", "11", "24", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "84", "11", "25", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "85", "11", "26", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "86", "11", "27", "As-LeftEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "87", "12", "1", "As-FoundStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "88", "12", "2", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "89", "12", "3", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "90", "12", "4", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "91", "12", "5", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "92", "12", "6", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "93", "12", "7", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "94", "12", "8", "As-FoundEnd", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "95", "12", "9", "Temperature", "10", "23", "01:00", "", "1" });
+            seed.Steps.Add(new[] { "96", "12", "10", "Adjust", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "97", "12", "11", "Humidity", "10", "23", "00:15", "", "1" });
+            seed.Steps.Add(new[] { "98", "12", "12", "Humidity", "50", "23", "00:15", "", "1" });
+            seed.Steps.Add(new[] { "99", "12", "13", "Humidity", "90", "23", "00:15", "", "1" });
+            seed.Steps.Add(new[] { "100", "12", "14", "Adjust", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "101", "12", "15", "As-LeftStart", "", "", "", "", "0" });
+            seed.Steps.Add(new[] { "102", "12", "16", "Temperature", "20", "5", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "103", "12", "17", "Temperature", "20", "25", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "104", "12", "18", "Temperature", "20", "50", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "105", "12", "19", "Humidity", "10", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "106", "12", "20", "Humidity", "50", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "107", "12", "21", "Humidity", "90", "23", "00:15", "", "0" });
+            seed.Steps.Add(new[] { "108", "12", "22", "As-LeftEnd", "", "", "", "", "0" });
+
+            return seed;
+        }
+
+        private static object TryParseCsvDoubleOrDbNull(string[] row, int index)
+        {
+            if (row == null || index < 0 || index >= row.Length)
+                return DBNull.Value;
+            var s = (row[index] ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(s))
+                return DBNull.Value;
+            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                return v;
+            return DBNull.Value;
+        }
+
+
+
+
 
         private static string TryParseDdMmmYyyyToIsoUtcOrNull(string ddMmmYyyy)
         {
@@ -473,6 +783,10 @@ CREATE INDEX IF NOT EXISTS IX_Sample_CalibrationId_SampleUtc ON Sample(Calibrati
 
                 EnsureSampleSchema(conn);
 
+                EnsureProcedureTables(conn);
+
+                SeedProceduresFromCsvIfEmpty(conn);
+
             }
         }
 
@@ -557,7 +871,7 @@ CREATE INDEX IF NOT EXISTS IX_Sample_CalibrationId_SampleUtc ON Sample(Calibrati
                 conn.Open();
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = "SELECT DISTINCT Name FROM Procedure ORDER BY Name;";
+                    cmd.CommandText = "SELECT Name FROM " + ProcedureTableName + " ORDER BY Name;";
                     using (var r = cmd.ExecuteReader())
                     {
                         while (r.Read())
@@ -581,7 +895,7 @@ CREATE INDEX IF NOT EXISTS IX_Sample_CalibrationId_SampleUtc ON Sample(Calibrati
                 conn.Open();
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = "DELETE FROM Procedure WHERE Name = @Name;";
+                    cmd.CommandText = "DELETE FROM " + ProcedureTableName + " WHERE Name = @Name;";
                     cmd.Parameters.AddWithValue("@Name", name.Trim());
                     cmd.ExecuteNonQuery();
                 }
@@ -600,10 +914,12 @@ CREATE INDEX IF NOT EXISTS IX_Sample_CalibrationId_SampleUtc ON Sample(Calibrati
                 conn.Open();
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = @"SELECT ProcedureId, Name, Description, Step, HumiditySetpoint, TemperatureSetpointC, SoakTime, Accuracy, Adjustment
-FROM Procedure
-WHERE Name = @Name
-ORDER BY ProcedureId;";
+                    cmd.CommandText = @"SELECT p.ProcedureId, p.Name, p.Description,
+       s.Step, s.HumiditySetpoint, s.TemperatureSetpointC, s.SoakTime, s.Accuracy, s.Adjustment
+FROM " + ProcedureTableName + @" p
+JOIN " + ProcedureStepTableName + @" s ON s.ProcedureId = p.ProcedureId
+WHERE p.Name = @Name
+ORDER BY s.StepOrder;";
                     cmd.Parameters.AddWithValue("@Name", name.Trim());
                     using (var r = cmd.ExecuteReader())
                     {
@@ -644,32 +960,51 @@ ORDER BY ProcedureId;";
                 conn.Open();
                 using (var tx = conn.BeginTransaction())
                 {
-                    using (var del = conn.CreateCommand())
+                    long procedureId;
+                    using (var upsert = conn.CreateCommand())
                     {
-                        del.Transaction = tx;
-                        del.CommandText = "DELETE FROM Procedure WHERE Name = @Name;";
-                        del.Parameters.AddWithValue("@Name", name);
-                        del.ExecuteNonQuery();
+                        upsert.Transaction = tx;
+                        upsert.CommandText = @"INSERT INTO " + ProcedureTableName + @"(Name, Description, CreatedUtc, UpdatedUtc)
+VALUES(@Name, @Description, @Utc, @Utc)
+ON CONFLICT(Name) DO UPDATE SET
+    Description = excluded.Description,
+    UpdatedUtc = excluded.UpdatedUtc;
+
+SELECT ProcedureId FROM " + ProcedureTableName + @" WHERE Name = @Name LIMIT 1;";
+                        upsert.Parameters.AddWithValue("@Name", name);
+                        upsert.Parameters.AddWithValue("@Description", (object)description);
+                        upsert.Parameters.AddWithValue("@Utc", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+                        procedureId = (long)upsert.ExecuteScalar();
+                    }
+
+                    using (var delSteps = conn.CreateCommand())
+                    {
+                        delSteps.Transaction = tx;
+                        delSteps.CommandText = "DELETE FROM " + ProcedureStepTableName + " WHERE ProcedureId = @ProcedureId;";
+                        delSteps.Parameters.AddWithValue("@ProcedureId", procedureId);
+                        delSteps.ExecuteNonQuery();
                     }
 
                     using (var ins = conn.CreateCommand())
                     {
                         ins.Transaction = tx;
-                        ins.CommandText = @"INSERT INTO Procedure (Name, Step, HumiditySetpoint, TemperatureSetpointC, SoakTime, Accuracy, Adjustment, Description)
-VALUES (@Name, @Step, @HumiditySetpoint, @TemperatureSetpointC, @SoakTime, @Accuracy, @Adjustment, @Description);";
+                        ins.CommandText = @"INSERT INTO " + ProcedureStepTableName + @"(ProcedureId, StepOrder, Step, HumiditySetpoint, TemperatureSetpointC, SoakTime, Accuracy, Adjustment)
+VALUES (@ProcedureId, @StepOrder, @Step, @HumiditySetpoint, @TemperatureSetpointC, @SoakTime, @Accuracy, @Adjustment);";
 
-                        var pName = ins.Parameters.Add("@Name", System.Data.DbType.String);
+                        var pProcId = ins.Parameters.Add("@ProcedureId", System.Data.DbType.Int64);
+                        var pOrder = ins.Parameters.Add("@StepOrder", System.Data.DbType.Int32);
                         var pStep = ins.Parameters.Add("@Step", System.Data.DbType.String);
                         var pHum = ins.Parameters.Add("@HumiditySetpoint", System.Data.DbType.Double);
                         var pTemp = ins.Parameters.Add("@TemperatureSetpointC", System.Data.DbType.Double);
                         var pSoak = ins.Parameters.Add("@SoakTime", System.Data.DbType.String);
                         var pAcc = ins.Parameters.Add("@Accuracy", System.Data.DbType.Double);
                         var pAdj = ins.Parameters.Add("@Adjustment", System.Data.DbType.Int32);
-                        var pDesc = ins.Parameters.Add("@Description", System.Data.DbType.String);
 
+                        int order = 1;
                         foreach (var s in steps)
                         {
-                            pName.Value = name;
+                            pProcId.Value = procedureId;
+                            pOrder.Value = order++;
                             pStep.Value = (s?.Step ?? string.Empty).Trim();
 
                             pHum.Value = (s != null && !double.IsNaN(s.SetPointRH)) ? (object)s.SetPointRH : DBNull.Value;
@@ -677,7 +1012,6 @@ VALUES (@Name, @Step, @HumiditySetpoint, @TemperatureSetpointC, @SoakTime, @Accu
                             pSoak.Value = (s?.SoakTime ?? string.Empty).Trim();
                             pAcc.Value = (s != null && !double.IsNaN(s.Accuracy)) ? (object)s.Accuracy : DBNull.Value;
                             pAdj.Value = (s != null && s.Adjust) ? 1 : 0;
-                            pDesc.Value = description;
 
                             ins.ExecuteNonQuery();
                         }

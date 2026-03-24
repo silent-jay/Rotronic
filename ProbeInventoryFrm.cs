@@ -52,6 +52,8 @@ namespace Rotronic
                 Data.InitializeDatabase();
                 dataGridViewProbe.Rows.Clear();
 
+                ApplyTwoDecimalFormatting(dataGridViewProbe);
+
                 using (var conn = new SQLiteConnection(GetConnectionStringForProbeInventory()))
                 {
                     conn.Open();
@@ -89,6 +91,41 @@ namespace Rotronic
             {
                 MessageBox.Show(this, "Failed to load probes: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private static void ApplyTwoDecimalFormatting(DataGridView grid)
+        {
+            if (grid == null)
+                return;
+
+            try
+            {
+                foreach (DataGridViewColumn c in grid.Columns)
+                {
+                    if (c == null)
+                        continue;
+
+                    var name = c.Name ?? string.Empty;
+
+                    if (name.IndexOf("Accuracy", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        c.DefaultCellStyle.Format = "0.00";
+                        continue;
+                    }
+
+                    if (name.IndexOf("Count", StringComparison.OrdinalIgnoreCase) >= 0)
+                        continue;
+
+                    if (name.IndexOf("Temp", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Temperature", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Hum", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        c.DefaultCellStyle.Format = "0.00";
+                    }
+                }
+            }
+            catch { }
         }
 
         private static string FormatDbUtcToDdMmmYyyyHmOrEmpty(string dbUtc)

@@ -132,6 +132,10 @@ ORDER BY StepNumber ASC;";
             TryMoveColumn(dataGridViewSteps, "TemperatureError", 8);
             TryMoveColumn(dataGridViewSteps, "PassFail", dataGridViewSteps.Columns.Count - 1);
 
+            ApplyTwoDecimalFormatting(dataGridViewSteps);
+
+            TryTogglePassFailColumnVisibility();
+
             try
             {
                 dataGridViewSteps.CellFormatting -= dataGridViewSteps_CellFormatting;
@@ -228,6 +232,60 @@ ORDER BY SampleUtc ASC;";
             TryMoveColumn(dataGridViewSamples, "TemperatureError", 6);
 
             TryMoveColumn(dataGridViewSamples, "PassFail", dataGridViewSamples.Columns.Count - 1);
+
+            ApplyTwoDecimalFormatting(dataGridViewSamples);
+
+            TryTogglePassFailColumnVisibility();
+        }
+
+        private void TryTogglePassFailColumnVisibility()
+        {
+            try
+            {
+                var accuracy = GetCurrentStepAccuracy();
+                bool show = accuracy.HasValue && accuracy.Value != 0;
+
+                if (dataGridViewSteps != null && dataGridViewSteps.Columns.Contains("PassFail"))
+                    dataGridViewSteps.Columns["PassFail"].Visible = show;
+                if (dataGridViewSamples != null && dataGridViewSamples.Columns.Contains("PassFail"))
+                    dataGridViewSamples.Columns["PassFail"].Visible = show;
+            }
+            catch { }
+        }
+
+        private static void ApplyTwoDecimalFormatting(DataGridView grid)
+        {
+            if (grid == null)
+                return;
+
+            try
+            {
+                foreach (DataGridViewColumn c in grid.Columns)
+                {
+                    if (c == null)
+                        continue;
+
+                    var name = c.Name ?? string.Empty;
+
+                    if (name.IndexOf("Accuracy", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        c.DefaultCellStyle.Format = "0.00";
+                        continue;
+                    }
+
+                    if (name.IndexOf("Count", StringComparison.OrdinalIgnoreCase) >= 0)
+                        continue;
+
+                    if (name.IndexOf("Temp", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Temperature", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Hum", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Humidity", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        c.DefaultCellStyle.Format = "0.00";
+                    }
+                }
+            }
+            catch { }
         }
 
         private void AddStepDerivedColumns(DataTable dt)

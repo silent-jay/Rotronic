@@ -91,6 +91,7 @@
       <DependentUpon>ChamberOptions.cs</DependentUpon>
     </Compile>
     <Compile Include="CoefficientCalc.cs" />
+    <Compile Include="InitialSeed.cs" />
     <Compile Include="Notes\Temp Conversion.cs" />
     <Compile Include="ProbeInventoryCalHistoryFrm.cs">
       <SubType>Form</SubType>

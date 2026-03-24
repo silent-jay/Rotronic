@@ -44,6 +44,12 @@
             this.labelMirror = new System.Windows.Forms.Label();
             this.panelChamberStable = new System.Windows.Forms.Panel();
             this.panelMirrorStable = new System.Windows.Forms.Panel();
+            this.label5 = new System.Windows.Forms.Label();
+            this.richTextBox1 = new System.Windows.Forms.RichTextBox();
+            this.label6 = new System.Windows.Forms.Label();
+            this.comboBoxUser = new System.Windows.Forms.ComboBox();
+            this.label7 = new System.Windows.Forms.Label();
+            this.buttonManage = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.dataGridViewCalProgress)).BeginInit();
             this.SuspendLayout();
             // 
@@ -68,7 +74,7 @@
             // textBoxTemp
             // 
             this.textBoxTemp.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.textBoxTemp.Location = new System.Drawing.Point(330, 591);
+            this.textBoxTemp.Location = new System.Drawing.Point(271, 590);
             this.textBoxTemp.Name = "textBoxTemp";
             this.textBoxTemp.Size = new System.Drawing.Size(197, 62);
             this.textBoxTemp.TabIndex = 2;
@@ -76,7 +82,7 @@
             // textBoxHum
             // 
             this.textBoxHum.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.textBoxHum.Location = new System.Drawing.Point(569, 592);
+            this.textBoxHum.Location = new System.Drawing.Point(510, 591);
             this.textBoxHum.Name = "textBoxHum";
             this.textBoxHum.Size = new System.Drawing.Size(266, 62);
             this.textBoxHum.TabIndex = 3;
@@ -84,7 +90,7 @@
             // textBoxTempSP
             // 
             this.textBoxTempSP.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.textBoxTempSP.Location = new System.Drawing.Point(330, 703);
+            this.textBoxTempSP.Location = new System.Drawing.Point(271, 702);
             this.textBoxTempSP.Name = "textBoxTempSP";
             this.textBoxTempSP.Size = new System.Drawing.Size(197, 62);
             this.textBoxTempSP.TabIndex = 4;
@@ -92,7 +98,7 @@
             // textBoxHumSP
             // 
             this.textBoxHumSP.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.textBoxHumSP.Location = new System.Drawing.Point(569, 704);
+            this.textBoxHumSP.Location = new System.Drawing.Point(510, 703);
             this.textBoxHumSP.Name = "textBoxHumSP";
             this.textBoxHumSP.Size = new System.Drawing.Size(266, 62);
             this.textBoxHumSP.TabIndex = 5;
@@ -100,7 +106,7 @@
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(330, 565);
+            this.label1.Location = new System.Drawing.Point(271, 564);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(100, 20);
             this.label1.TabIndex = 6;
@@ -109,7 +115,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(330, 680);
+            this.label2.Location = new System.Drawing.Point(271, 679);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(164, 20);
             this.label2.TabIndex = 7;
@@ -118,7 +124,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(565, 569);
+            this.label3.Location = new System.Drawing.Point(506, 568);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(70, 20);
             this.label3.TabIndex = 8;
@@ -127,7 +133,7 @@
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(565, 681);
+            this.label4.Location = new System.Drawing.Point(506, 680);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(134, 20);
             this.label4.TabIndex = 9;
@@ -136,7 +142,7 @@
             // textBoxSoak
             // 
             this.textBoxSoak.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.textBoxSoak.Location = new System.Drawing.Point(49, 643);
+            this.textBoxSoak.Location = new System.Drawing.Point(49, 591);
             this.textBoxSoak.Name = "textBoxSoak";
             this.textBoxSoak.Size = new System.Drawing.Size(193, 62);
             this.textBoxSoak.TabIndex = 10;
@@ -155,7 +161,7 @@
             // 
             this.labelChamber.AutoSize = true;
             this.labelChamber.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.labelChamber.Location = new System.Drawing.Point(897, 591);
+            this.labelChamber.Location = new System.Drawing.Point(838, 590);
             this.labelChamber.Name = "labelChamber";
             this.labelChamber.Size = new System.Drawing.Size(402, 55);
             this.labelChamber.TabIndex = 12;
@@ -165,7 +171,7 @@
             // 
             this.labelMirror.AutoSize = true;
             this.labelMirror.Font = new System.Drawing.Font("Microsoft Sans Serif", 24F);
-            this.labelMirror.Location = new System.Drawing.Point(897, 700);
+            this.labelMirror.Location = new System.Drawing.Point(838, 699);
             this.labelMirror.Name = "labelMirror";
             this.labelMirror.Size = new System.Drawing.Size(328, 55);
             this.labelMirror.TabIndex = 13;
@@ -174,7 +180,7 @@
             // panelChamberStable
             // 
             this.panelChamberStable.BackColor = System.Drawing.Color.Red;
-            this.panelChamberStable.Location = new System.Drawing.Point(860, 604);
+            this.panelChamberStable.Location = new System.Drawing.Point(801, 603);
             this.panelChamberStable.Name = "panelChamberStable";
             this.panelChamberStable.Size = new System.Drawing.Size(28, 28);
             this.panelChamberStable.TabIndex = 14;
@@ -183,17 +189,79 @@
             // panelMirrorStable
             // 
             this.panelMirrorStable.BackColor = System.Drawing.Color.Red;
-            this.panelMirrorStable.Location = new System.Drawing.Point(860, 713);
+            this.panelMirrorStable.Location = new System.Drawing.Point(801, 712);
             this.panelMirrorStable.Name = "panelMirrorStable";
             this.panelMirrorStable.Size = new System.Drawing.Size(28, 28);
             this.panelMirrorStable.TabIndex = 15;
             this.panelMirrorStable.Paint += new System.Windows.Forms.PaintEventHandler(this.panelMirrorStable_Paint);
+            // 
+            // label5
+            // 
+            this.label5.AutoSize = true;
+            this.label5.Location = new System.Drawing.Point(45, 564);
+            this.label5.Name = "label5";
+            this.label5.Size = new System.Drawing.Size(147, 20);
+            this.label5.TabIndex = 16;
+            this.label5.Text = "Soak/Sample Timer";
+            // 
+            // richTextBox1
+            // 
+            this.richTextBox1.Location = new System.Drawing.Point(1246, 591);
+            this.richTextBox1.Name = "richTextBox1";
+            this.richTextBox1.Size = new System.Drawing.Size(433, 87);
+            this.richTextBox1.TabIndex = 17;
+            this.richTextBox1.Text = "";
+            // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.label6.Location = new System.Drawing.Point(1246, 568);
+            this.label6.Name = "label6";
+            this.label6.Size = new System.Drawing.Size(51, 20);
+            this.label6.TabIndex = 18;
+            this.label6.Text = "Notes";
+            // 
+            // comboBoxUser
+            // 
+            this.comboBoxUser.FormattingEnabled = true;
+            this.comboBoxUser.Items.AddRange(new object[] {
+            "Jeremy Martin",
+            "Laura Sweeton"});
+            this.comboBoxUser.Location = new System.Drawing.Point(1246, 737);
+            this.comboBoxUser.Name = "comboBoxUser";
+            this.comboBoxUser.Size = new System.Drawing.Size(231, 28);
+            this.comboBoxUser.TabIndex = 19;
+            // 
+            // label7
+            // 
+            this.label7.AutoSize = true;
+            this.label7.Location = new System.Drawing.Point(1242, 714);
+            this.label7.Name = "label7";
+            this.label7.Size = new System.Drawing.Size(72, 20);
+            this.label7.TabIndex = 20;
+            this.label7.Text = "Operator";
+            // 
+            // buttonManage
+            // 
+            this.buttonManage.Location = new System.Drawing.Point(1506, 711);
+            this.buttonManage.Name = "buttonManage";
+            this.buttonManage.Size = new System.Drawing.Size(125, 54);
+            this.buttonManage.TabIndex = 21;
+            this.buttonManage.Text = "Manage";
+            this.buttonManage.UseVisualStyleBackColor = true;
+            this.buttonManage.Click += new System.EventHandler(this.buttonManage_Click);
             // 
             // CalProgressFrm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1736, 822);
+            this.Controls.Add(this.buttonManage);
+            this.Controls.Add(this.label7);
+            this.Controls.Add(this.comboBoxUser);
+            this.Controls.Add(this.label6);
+            this.Controls.Add(this.richTextBox1);
+            this.Controls.Add(this.label5);
             this.Controls.Add(this.panelMirrorStable);
             this.Controls.Add(this.panelChamberStable);
             this.Controls.Add(this.labelMirror);
@@ -236,5 +304,11 @@
         private System.Windows.Forms.Label labelMirror;
         private System.Windows.Forms.Panel panelChamberStable;
         private System.Windows.Forms.Panel panelMirrorStable;
+        private System.Windows.Forms.Label label5;
+        private System.Windows.Forms.RichTextBox richTextBox1;
+        private System.Windows.Forms.Label label6;
+        private System.Windows.Forms.ComboBox comboBoxUser;
+        private System.Windows.Forms.Label label7;
+        private System.Windows.Forms.Button buttonManage;
     }
 }

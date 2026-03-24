@@ -189,14 +189,21 @@ namespace Rotronic
             {
                 Data.InitializeDatabase();
                 var rows = Data.GetProcedureRows(name);
-                if (rows == null || rows.Count == 0)
-                    return;
-
                 dataGridViewStep.Rows.Clear();
-                richTextBoxDescription.Text = rows[0].Description ?? string.Empty;
+                richTextBoxDescription.Text = (rows != null && rows.Count > 0) ? (rows[0].Description ?? string.Empty) : string.Empty;
+
+                if (rows == null || rows.Count == 0)
+                {
+                    _hasUnsavedChanges = false;
+                    buttonSave.Text = "Update";
+                    return;
+                }
 
                 foreach (var r in rows)
                 {
+                    if (!HasStoredStepData(r))
+                        continue;
+
                     int idx = dataGridViewStep.Rows.Add();
                     var gridRow = dataGridViewStep.Rows[idx];
                     gridRow.Cells["Step"].Value = r.Step ?? string.Empty;
@@ -218,6 +225,20 @@ namespace Rotronic
             {
                 MessageBox.Show(this, "Failed to load procedure: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private static bool HasStoredStepData(Data.ProcedureRow row)
+        {
+            if (row == null)
+                return false;
+
+            return row.StepId.HasValue
+                || !string.IsNullOrWhiteSpace(row.Step)
+                || row.HumiditySetpoint.HasValue
+                || row.TemperatureSetpointC.HasValue
+                || !string.IsNullOrWhiteSpace(row.SoakTime)
+                || row.Accuracy.HasValue
+                || row.Adjustment.HasValue;
         }
 
         private int FindAdjustPointColumnIndex()

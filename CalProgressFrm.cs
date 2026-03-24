@@ -1925,6 +1925,84 @@ WHERE StepId = @StepId;";
                 System.Threading.Thread.Sleep(50);
             }
         }
+
+        private void buttonManage_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new Form())
+            using (var editor = new RichTextBox())
+            using (var buttonOk = new Button())
+            using (var buttonCancel = new Button())
+            {
+                dialog.Text = "Manage Operators";
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.SizableToolWindow;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ClientSize = new Size(420, 320);
+
+                editor.Location = new Point(12, 12);
+                editor.Size = new Size(396, 250);
+                editor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+                editor.WordWrap = false;
+                editor.AcceptsTab = true;
+                editor.Text = string.Join(Environment.NewLine,
+                    comboBoxUser.Items.Cast<object>()
+                        .Select(item => Convert.ToString(item, CultureInfo.CurrentCulture) ?? string.Empty));
+
+                buttonOk.Text = "OK";
+                buttonOk.DialogResult = DialogResult.OK;
+                buttonOk.Size = new Size(90, 32);
+                buttonOk.Location = new Point(222, 276);
+                buttonOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+
+                buttonCancel.Text = "Cancel";
+                buttonCancel.DialogResult = DialogResult.Cancel;
+                buttonCancel.Size = new Size(90, 32);
+                buttonCancel.Location = new Point(318, 276);
+                buttonCancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+
+                dialog.Controls.Add(editor);
+                dialog.Controls.Add(buttonOk);
+                dialog.Controls.Add(buttonCancel);
+                dialog.AcceptButton = buttonOk;
+                dialog.CancelButton = buttonCancel;
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                    return;
+
+                var previousSelection = (comboBoxUser.Text ?? string.Empty).Trim();
+                var entries = editor.Lines
+                    .Select(line => (line ?? string.Empty).Trim())
+                    .Where(line => !string.IsNullOrWhiteSpace(line))
+                    .Distinct(StringComparer.CurrentCulture)
+                    .ToList();
+
+                comboBoxUser.BeginUpdate();
+                try
+                {
+                    comboBoxUser.Items.Clear();
+                    foreach (var entry in entries)
+                        comboBoxUser.Items.Add(entry);
+                }
+                finally
+                {
+                    comboBoxUser.EndUpdate();
+                }
+
+                if (!string.IsNullOrWhiteSpace(previousSelection) && comboBoxUser.Items.Contains(previousSelection))
+                {
+                    comboBoxUser.SelectedItem = previousSelection;
+                }
+                else if (comboBoxUser.Items.Count > 0)
+                {
+                    comboBoxUser.SelectedIndex = 0;
+                }
+                else
+                {
+                    comboBoxUser.Text = string.Empty;
+                }
+            }
+        }
     }
 }
 

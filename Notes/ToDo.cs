@@ -18,14 +18,11 @@ UI / reporting
 -------------------------------------------------------------------------------
 - UI user management
 - Calibration Certificates
-- Pre-populate database with validated calibration procedures.
   (recovery if program fails/crashes/interrupted).
-- Verify dates are being updated.
 
 -------------------------------------------------------------------------------
 Safety / validation
 -------------------------------------------------------------------------------
-- Guard against loading very bad coefficients to the probe.
 - Temperature/Humidity min/max for procedure and chamber inputs.
 
 -------------------------------------------------------------------------------
@@ -48,19 +45,6 @@ Misc
 - Help file, manuals, etc.
 - Alert that calibration is complete. Change button to close form.
 - Probe cal and due dates not updating.
-- Reverse traceability from mirror/chamber to probes used.
-- Force decimal Precision across application.
-        UI elements with bad precision:
-            ListViewProb (main)
-            ListViewMirror (main)
-            ListViewChamber (main)
-            probeInventoryCalibrationData - datagridviewstep and datagridviewsamples
-            Step Editor
-            CalibrationSetup - all list views
-            CalProgressFrm DataGridView
-
-after change:
-   
 
             
             
